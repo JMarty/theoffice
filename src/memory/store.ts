@@ -35,12 +35,13 @@ export interface MemoryRow {
   keywords: string | null;
   salience: number;
   created_at: number;
+  accessed_at: number;
 }
 
 /** FTS5 search when `q` is given; otherwise most-recent, filterable by agent/category. */
 export function searchMemories(a: SearchArgs): MemoryRow[] {
   const db = getDb();
-  const limit = Math.min(a.limit ?? 50, 200);
+  const limit = Math.min(a.limit ?? 50, 500);
   const where: string[] = [];
   const params: unknown[] = [];
 
@@ -60,7 +61,7 @@ export function searchMemories(a: SearchArgs): MemoryRow[] {
   params.push(limit);
   return db
     .prepare(
-      `SELECT m.id, m.agent_id, m.category, m.content, m.keywords, m.salience, m.created_at
+      `SELECT m.id, m.agent_id, m.category, m.content, m.keywords, m.salience, m.created_at, m.accessed_at
        FROM memories m ${clause} ORDER BY m.created_at DESC LIMIT ?`
     )
     .all(...params) as MemoryRow[];
