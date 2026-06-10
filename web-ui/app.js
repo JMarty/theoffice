@@ -62,6 +62,25 @@ window.setUsageWin = (w) => {
   window._usageWin = w;
   showTab("usage");
 };
+window.doUpdate = async (btn) => {
+  if (!confirm("Update now? The dashboard rebuilds and briefly restarts — your agents keep running.")) return;
+  btn.disabled = true;
+  btn.textContent = "Updating… rebuilding (~30s)";
+  try {
+    const r = await post("/api/update/apply", {});
+    if (r.ok) {
+      btn.textContent = "Updated ✓ — restarting dashboard, reloading…";
+      setTimeout(() => location.reload(), 8000);
+    } else {
+      btn.disabled = false;
+      btn.textContent = "⟳ Update failed — retry";
+      alert("Update failed:\n\n" + (r.output || "").slice(-1500));
+    }
+  } catch (e) {
+    btn.textContent = "Update error (the dashboard may be restarting) — reload in a moment";
+    setTimeout(() => location.reload(), 9000);
+  }
+};
 
 async function refreshAgents() {
   await loadAgentsMap();
@@ -274,6 +293,18 @@ const TABS = {
     body.push([`<b>TOTAL</b>`, `<b>${fmt(tot.t)}</b>`, `<b>${fmt(tot.o)}</b>`, `<b>${fmt(tot.i)}</b>`, `<b>${fmt(tot.cr)}</b>`, `<b>${fmt(tot.cc)}</b>`]);
     return btns + `<p class="muted">window: <b>${esc(win)}</b> · output tokens = the headline figure (flat-rate subscription — usage signal, not billed per token)</p>` +
       rows(["Agent", "Turns", "Output", "Input", "Cache read", "Cache write"], body, true);
+  },
+
+  async updates() {
+    const d = await api("/api/update/check");
+    if (d.error) return `<div class="empty">${esc(d.error)}</div>`;
+    if (!d.behind) return `<div class="empty">✓ You're up to date<br><span class="muted">current build: ${esc(d.current)}</span></div>`;
+    const list = d.commits
+      .map((c) => `<div class="upd"><div class="updh"><b>${esc(c.subject)}</b> <span class="muted">${esc(c.hash)}</span></div>${c.body ? `<div class="updb">${esc(c.body)}</div>` : ""}</div>`)
+      .join("");
+    return `<p><b>${d.behind}</b> update${d.behind > 1 ? "s" : ""} available — you're on <code>${esc(d.current)}</code>:</p>${list}
+      <button id="do-update" onclick="doUpdate(this)">⟳ Update now</button>
+      <p class="muted">It pulls the latest, rebuilds, and briefly restarts the dashboard. Your agents keep running.</p>`;
   },
 
   async logs() {
