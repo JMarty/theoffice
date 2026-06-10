@@ -11,6 +11,7 @@ import { sendAgentMessage } from "../bus/index.js";
 import { enqueueOutbound } from "../queue/index.js";
 import { saveMemory, searchMemories } from "../memory/store.js";
 import { computeUsage, WINDOW_MS } from "./usage.js";
+import { checkUpdates, applyUpdate } from "./update.js";
 import { sessionNameFor, launchAgent } from "../session/session-manager.js";
 import { hasSession, capturePane, killSession } from "../session/tmux.js";
 import { detectPaneState } from "../session/pane-state.js";
@@ -164,6 +165,19 @@ async function handleApi(
       .map((u) => ({ ...u, displayName: agents.find((a) => a.id === u.id)?.displayName ?? u.id }))
       .sort((a, b) => b.output - a.output);
     return json(res, 200, { window: w, since: cutoff, bootMs: BOOT_MS, usage });
+  }
+
+  // GET /api/update/check — list commits this install is behind
+  if (path === "/api/update/check" && m === "GET") {
+    return json(res, 200, checkUpdates());
+  }
+  // POST /api/update/apply — pull + build + restart (engine bounces after the response)
+  if (path === "/api/update/apply" && m === "POST") {
+    try {
+      return json(res, 200, applyUpdate());
+    } catch (e) {
+      return json(res, 200, { ok: false, output: String((e as Error).message) });
+    }
   }
 
   // GET /api/daily-logs?agent=&limit=

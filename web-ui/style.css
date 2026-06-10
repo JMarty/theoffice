@@ -97,3 +97,6 @@ button.mini.ghost { background: var(--panel); border: 1px solid var(--line); col
 .schhead { display: flex; gap: 8px; align-items: center; font-size: 14px; }
 .schtime { font-size: 13px; margin: 4px 0; }
 .schdesc { color: var(--muted); font-size: 13px; }
+.upd { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.updh { font-size: 14px; }
+.updb { color: var(--muted); font-size: 13px; margin-top: 4px; white-space: pre-wrap; }
