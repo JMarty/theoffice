@@ -1,0 +1,33 @@
+# deps & build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# logs
+*.log
+logs/
+
+# --- TENANT DATA & SECRETS: never commit (platform/tenant boundary) ---
+# Ignore EVERYTHING under tenant/ (agents, skills, scheduled-tasks, archived,
+# store, secrets, memories) — it's per-install runtime data. Only the config
+# example is kept so a fresh clone can seed itself.
+/tenant/**
+!/tenant/config/
+!/tenant/config/overrides.example.json
+
+# env & secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.vault-key
+*-token
+*.token
+*oauth2*.json
+*-sa.json
+.dashboard-token
+
+# os / editor
+.DS_Store
+*.swp
