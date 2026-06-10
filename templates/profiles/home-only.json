@@ -1,0 +1,15 @@
+{
+  "description": "Restricted profile example: ALLOWS Home Assistant + Kifli connectors; DENIES every other claude.ai connector (Gmail, Drive, Calendar, Wallet, Notion, Slack, Zoom, Cloudflare, Netlify, Box). For an agent that should only touch home/IoT + groceries. Assign via agent.json \"profile\":\"home-only\".",
+  "deny": [
+    "mcp__claude_ai_Gmail__*",
+    "mcp__claude_ai_Google_Calendar__*",
+    "mcp__claude_ai_Google_Drive__*",
+    "mcp__claude_ai_Notion__*",
+    "mcp__claude_ai_Slack__*",
+    "mcp__claude_ai_Wallet__*",
+    "mcp__claude_ai_Zoom_for_Claude__*",
+    "mcp__claude_ai_Cloudflare_Developer_Platform__*",
+    "mcp__claude_ai_Netlify__*",
+    "mcp__claude_ai_Box__*"
+  ]
+}

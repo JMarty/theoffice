@@ -1,0 +1,11 @@
+{
+  "mainAgentId": "main",
+  "owner": {
+    "displayName": "Owner",
+    "slackUserId": "",
+    "locale": "en",
+    "timezone": "UTC"
+  },
+  "channel": { "provider": "slack" },
+  "web": { "host": "127.0.0.1", "port": 3430 }
+}

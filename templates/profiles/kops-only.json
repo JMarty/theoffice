@@ -1,0 +1,6 @@
+{
+  "description": "Restricted profile example: DENIES ALL claude.ai account connectors (no Gmail, Wallet, Drive, Kifli, etc.). For an outward/shared agent whose work is non-connector: chat + memory + an explicitly-wired scoped local MCP + web. Assign via agent.json \"profile\":\"kops-only\".",
+  "deny": [
+    "mcp__claude_ai_*"
+  ]
+}
