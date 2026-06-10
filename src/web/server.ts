@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -189,6 +190,14 @@ async function handleApi(
       : db.prepare(`SELECT id, agent_id, date, content, created_at FROM daily_logs ORDER BY id DESC LIMIT ?`).all(limit);
     return json(res, 200, rows);
   }
+  // POST /api/daily-log (alias /api/daily-logs) — live write path; replaces raw-sqlite daily-log writes
+  if ((path === "/api/daily-log" || path === "/api/daily-logs") && m === "POST") {
+    const b = parseJson(await readBody(req));
+    if (!b?.agentId || !b?.content) return json(res, 400, { error: "agentId and content required" });
+    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Budapest" });
+    const r = db.prepare(`INSERT INTO daily_logs (agent_id, date, content) VALUES (?, ?, ?)`).run(b.agentId, date, b.content);
+    return json(res, 200, { id: Number(r.lastInsertRowid) });
+  }
 
   // GET /api/memories  POST /api/memories
   if (path === "/api/memories" && m === "GET") {
@@ -214,6 +223,19 @@ async function handleApi(
       ? db.prepare(`SELECT * FROM kanban_cards WHERE archived_at IS NULL AND status=? ORDER BY sort_order`).all(status)
       : db.prepare(`SELECT * FROM kanban_cards WHERE archived_at IS NULL ORDER BY status, sort_order`).all();
     return json(res, 200, rows);
+  }
+  // POST /api/kanban — create a card (live write path; replaces raw-sqlite card creation)
+  if (path === "/api/kanban" && m === "POST") {
+    const b = parseJson(await readBody(req));
+    if (!b?.title) return json(res, 400, { error: "title required" });
+    if (b.status && !["planned", "in_progress", "waiting", "done"].includes(b.status)) return json(res, 400, { error: "bad status" });
+    if (b.priority && !["low", "normal", "high", "urgent"].includes(b.priority)) return json(res, 400, { error: "bad priority" });
+    const id = randomBytes(4).toString("hex");
+    db.prepare(`INSERT INTO kanban_cards (id, title, description, status, assignee, priority, project, parent_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, b.title, b.description ?? null, b.status ?? "planned", b.assignee ?? null,
+        b.priority ?? "normal", b.project ?? null, b.parentId ?? null);
+    return json(res, 200, { id });
   }
 
   // GET /api/schedules
@@ -319,15 +341,30 @@ async function handleApi(
     const body = parseJson(await readBody(req)) ?? {};
     const st = body.status;
     if (!["planned", "in_progress", "waiting", "done"].includes(st)) return json(res, 400, { error: "bad status" });
-    db.prepare(`UPDATE kanban_cards SET status=?, updated_at=unixepoch() WHERE id=?`).run(st, decodeURIComponent(km[1]!));
-    return json(res, 200, { ok: true });
+    const id = decodeURIComponent(km[1]!);
+    const info = db.prepare(`UPDATE kanban_cards SET status=?, updated_at=unixepoch() WHERE id=?`).run(st, id);
+    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    return json(res, 200, { ok: true, id });
   }
 
   // --- kanban archive : /api/kanban/<id>/archive (reversible: set archived_at) ---
   const ka = path.match(/^\/api\/kanban\/([^/]+)\/archive$/);
   if (ka && m === "POST") {
-    db.prepare(`UPDATE kanban_cards SET archived_at=unixepoch(), updated_at=unixepoch() WHERE id=?`).run(decodeURIComponent(ka[1]!));
-    return json(res, 200, { ok: true });
+    const id = decodeURIComponent(ka[1]!);
+    const info = db.prepare(`UPDATE kanban_cards SET archived_at=unixepoch(), updated_at=unixepoch() WHERE id=?`).run(id);
+    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    return json(res, 200, { ok: true, id });
+  }
+
+  // --- memory category update : /api/memories/<id>/category {category} — live hot->cold reclass path ---
+  const mc = path.match(/^\/api\/memories\/([^/]+)\/category$/);
+  if (mc && m === "POST") {
+    const b = parseJson(await readBody(req)) ?? {};
+    if (!["hot", "warm", "cold", "shared"].includes(b.category)) return json(res, 400, { error: "bad category" });
+    const id = decodeURIComponent(mc[1]!);
+    const info = db.prepare(`UPDATE memories SET category=? WHERE id=?`).run(b.category, id);
+    if (info.changes === 0) return json(res, 404, { error: "memory not found", id });
+    return json(res, 200, { ok: true, id, category: b.category });
   }
 
   return json(res, 404, { error: "not found" });
