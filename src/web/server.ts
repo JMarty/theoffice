@@ -221,9 +221,19 @@ async function handleApi(
     return json(res, 200, loadScheduledTasks(cfg));
   }
 
-  // GET /api/messages  POST /api/messages (delegate)  POST sets status done via ?id
+  // GET /api/messages?to=&from=&status=&limit=  — filters are optional + composable
   if (path === "/api/messages" && m === "GET") {
-    const rows = db.prepare(`SELECT * FROM agent_messages ORDER BY id DESC LIMIT 100`).all();
+    const where: string[] = [];
+    const args: unknown[] = [];
+    const to = url.searchParams.get("to");
+    const from = url.searchParams.get("from");
+    const status = url.searchParams.get("status");
+    if (to) { where.push("to_agent = ?"); args.push(to); }
+    if (from) { where.push("from_agent = ?"); args.push(from); }
+    if (status) { where.push("status = ?"); args.push(status); }
+    const limit = Math.min(Math.max(1, Number(url.searchParams.get("limit") ?? 100) || 100), 500);
+    const sql = `SELECT * FROM agent_messages ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY id DESC LIMIT ?`;
+    const rows = db.prepare(sql).all(...args, limit);
     return json(res, 200, rows);
   }
   if (path === "/api/messages" && m === "POST") {
@@ -236,8 +246,9 @@ async function handleApi(
   if (path === "/api/messages/done" && m === "POST") {
     const b = parseJson(await readBody(req));
     if (!b?.id) return json(res, 400, { error: "id required" });
-    db.prepare(`UPDATE agent_messages SET status='done', result=?, completed_at=unixepoch() WHERE id=?`).run(b.result ?? null, b.id);
-    return json(res, 200, { ok: true });
+    const info = db.prepare(`UPDATE agent_messages SET status='done', result=?, completed_at=unixepoch() WHERE id=?`).run(b.result ?? null, b.id);
+    if (info.changes === 0) return json(res, 404, { error: "message not found", id: b.id });
+    return json(res, 200, { ok: true, id: b.id });
   }
 
   // POST /api/outbound {agent, channel, text} — agent reply path (-> outbound_queue -> Slack)
