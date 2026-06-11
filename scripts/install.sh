@@ -2,7 +2,7 @@
 # The Office — one-shot installer for a fresh Linux container (Debian/Ubuntu).
 #
 # Run as your normal user (NEVER root/sudo — see the guard below). It:
-#   1. checks prerequisites (node 20-22, tmux, sqlite3, git, claude CLI)
+#   1. checks prerequisites (node 20-22, tmux, git, systemd --user, claude CLI)
 #   2. installs npm deps + builds (tsc -> dist/)
 #   3. lays down the tenant skeleton
 #   4. installs systemd --user units:
@@ -29,9 +29,12 @@ TENANT_ROOT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
 TZ_VALUE="${OFFICE_TZ:-Europe/Budapest}"
 SOCKET="${OFFICE_TMUX_SOCKET:-theoffice}"
 UNIT_DIR="$HOME/.config/systemd/user"
+USER_NAME="$(id -un)"  # reliable even when $USER is unset (fresh/headless env)
 
-say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
+# Colors only on a TTY — avoid raw escape sequences under `curl | bash` or when redirected.
+if [ -t 1 ]; then C_BLUE='\033[1;34m'; C_YEL='\033[1;33m'; C_OFF='\033[0m'; else C_BLUE=''; C_YEL=''; C_OFF=''; fi
+say()  { printf '%b==>%b %s\n' "$C_BLUE" "$C_OFF" "$*"; }
+warn() { printf '%b!!%b %s\n'  "$C_YEL"  "$C_OFF" "$*" >&2; }
 
 # ---- 1. prerequisites -------------------------------------------------------
 say "Checking prerequisites"
@@ -40,12 +43,29 @@ MISSING=0
 need node "install Node.js 20-22"
 need npm "comes with Node.js"
 need tmux "apt install tmux"
-need sqlite3 "apt install sqlite3"
 need git "apt install git"
+need systemctl "systemd is required — this installer uses --user units"
+need loginctl "part of systemd; needed for linger / boot autostart"
+# sqlite3 CLI is OPTIONAL: runtime uses the better-sqlite3 native module; only the
+# one-off v1 migration importer shells out to the CLI.
+command -v sqlite3 >/dev/null 2>&1 || warn "sqlite3 CLI not found (optional — only the v1 migration importer needs it)"
 if ! command -v claude >/dev/null 2>&1; then
   warn "claude CLI not found — agents cannot run without it. Install Claude Code and 'claude login' (or set CLAUDE_CODE_OAUTH_TOKEN) before starting agents."
 fi
-[ "${MISSING:-0}" = "1" ] && { warn "install the missing tools above, then re-run."; exit 1; }
+# better-sqlite3 compiles from source when no prebuilt binary matches this Node/arch
+# (odd Node version, musl/Alpine, some ARM). That needs a C toolchain — warn, don't fail.
+if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+  warn "no C compiler found — if better-sqlite3 has no prebuilt for this Node/arch, the build fails."
+  warn "  Install if needed: sudo apt install -y build-essential python3"
+fi
+# systemd --user must actually be usable (the binary can exist while the user
+# instance / D-Bus session is not running — common on fresh headless containers).
+if command -v systemctl >/dev/null 2>&1 && ! systemctl --user show-environment >/dev/null 2>&1; then
+  warn "systemd --user is not available in this session (no user instance / D-Bus)."
+  warn "  On a container, enable lingering systemd --user or run inside a real user session."
+  MISSING=1
+fi
+[ "${MISSING:-0}" = "1" ] && { warn "install/enable the items above, then re-run."; exit 1; }
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 if [ "$NODE_MAJOR" -lt 20 ] || [ "$NODE_MAJOR" -gt 22 ]; then
@@ -55,7 +75,9 @@ fi
 # ---- 2. build ---------------------------------------------------------------
 say "Installing dependencies ($INSTALL_DIR)"
 cd "$INSTALL_DIR"
-if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+# --include=dev: `build` is tsc (a devDependency); without this a shell with
+# NODE_ENV=production would omit it and the build fails with "tsc: not found".
+if [ -f package-lock.json ]; then npm ci --include=dev --no-audit --no-fund; else npm install --include=dev --no-audit --no-fund; fi
 say "Building (tsc -> dist/)"
 npm run build
 
@@ -152,19 +174,19 @@ EOF
 # logs in. enable-linger is privileged (polkit/root), so the plain call silently
 # fails under `curl | bash` (no tty). Try sudo first, then verify, then shout.
 say "Enabling linger (so the fleet starts at boot, without login)"
-if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" = "yes" ]; then
+if [ "$(loginctl show-user "$USER_NAME" -p Linger --value 2>/dev/null)" = "yes" ]; then
   say "linger already enabled"
 else
   # enable-linger needs root/polkit; try passwordless sudo, then interactive, then plain.
-  if sudo -n loginctl enable-linger "$USER" 2>/dev/null \
-     || sudo loginctl enable-linger "$USER" 2>/dev/null \
-     || loginctl enable-linger "$USER" 2>/dev/null; then :; fi
+  if sudo -n loginctl enable-linger "$USER_NAME" 2>/dev/null \
+     || sudo loginctl enable-linger "$USER_NAME" 2>/dev/null \
+     || loginctl enable-linger "$USER_NAME" 2>/dev/null; then :; fi
 fi
 # verify — do NOT continue silently if it failed
-if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
+if [ "$(loginctl show-user "$USER_NAME" -p Linger --value 2>/dev/null)" != "yes" ]; then
   warn "LINGER IS STILL OFF. The fleet will NOT start at boot until you run:"
-  warn "    sudo loginctl enable-linger $USER"
-  warn "Verify with: loginctl show-user $USER | grep Linger   # want: Linger=yes"
+  warn "    sudo loginctl enable-linger $USER_NAME"
+  warn "Verify with: loginctl show-user $USER_NAME | grep Linger   # want: Linger=yes"
 fi
 
 say "Starting services"
@@ -172,9 +194,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now theoffice-tmux.service
 systemctl --user enable --now theoffice.service
 
-sleep 2
-PORT="$(node -e "try{const c=require('$TENANT_ROOT/config/overrides.json');process.stdout.write(String((c.web&&c.web.port)||3430))}catch{process.stdout.write('3430')}")"
+# Wait for the engine to write its token rather than racing a fixed sleep on a slow box.
 TOKEN_FILE="$TENANT_ROOT/store/.dashboard-token"
+for _ in $(seq 1 20); do [ -f "$TOKEN_FILE" ] && break; sleep 0.5; done
+
+# OFFICE_PORT wins (config.ts honors it), then overrides.json, then default. Pass the
+# tenant path via the env (not string-interpolated) so odd paths can't break the JS.
+PORT="${OFFICE_PORT:-$(OFFICE_TENANT_ROOT="$TENANT_ROOT" node -e "try{const c=require(process.env.OFFICE_TENANT_ROOT+'/config/overrides.json');process.stdout.write(String((c.web&&c.web.port)||3430))}catch{process.stdout.write('3430')}")}"
 say "The Office is up."
 if [ "$BIND_HOST" = "0.0.0.0" ]; then
   LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -182,7 +208,12 @@ if [ "$BIND_HOST" = "0.0.0.0" ]; then
 else
   echo "  Dashboard : http://127.0.0.1:$PORT   (this machine only)"
 fi
-[ -f "$TOKEN_FILE" ] && echo "  API token : $(cat "$TOKEN_FILE")"
+if [ -f "$TOKEN_FILE" ]; then
+  echo "  API token : $(cat "$TOKEN_FILE")"
+  echo "              ^ secret (also stored in $TOKEN_FILE) — keep it private; it's the dashboard password"
+else
+  warn "dashboard token not written yet — find it later in $TOKEN_FILE"
+fi
 echo "  Logs      : journalctl --user -u theoffice.service -f"
 echo "  Next      : edit $TENANT_ROOT/config/overrides.json, add agents under tenant/agents/<id>/,"
 echo "              and per-agent Slack tokens under tenant/secrets/slack/<id>.json (see docs/CHANNELS-SETUP.md)."
