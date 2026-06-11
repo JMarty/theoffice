@@ -11,9 +11,10 @@ exactly one Socket-Mode connection per agent-app, so there is no event-splitting
 2. **Socket Mode** → Enable. Generate an **App-Level Token** (`xapp-…`) with scope
    `connections:write`.
 3. **OAuth & Permissions** → Bot Token Scopes: `chat:write`, `im:history`,
-   `im:read`, `im:write`, `users:read` (add `channels:history`/`app_mentions:read`
-   if the agent should also listen in channels). Install to workspace → copy the
-   **Bot User OAuth Token** (`xoxb-…`).
+   `im:read`, `im:write`, `users:read`, `files:read`, `files:write` (`files:read`
+   lets the agent open images/PDFs you send it; `files:write` lets it send files
+   back. Add `channels:history`/`app_mentions:read` if the agent should also listen
+   in channels). Install to workspace → copy the **Bot User OAuth Token** (`xoxb-…`).
 4. **Event Subscriptions** → Enable, subscribe to bot events: `message.im`
    (and `app_mention` if used).
 5. Note the bot's user id (`U…`) from "OAuth & Permissions" / `auth.test`.
@@ -35,7 +36,7 @@ the owner can't DM the agent.
     "bot_user": { "display_name": "Michael Scott", "always_online": true }
   },
   "oauth_config": {
-    "scopes": { "bot": ["chat:write", "im:history", "im:read", "im:write", "users:read"] }
+    "scopes": { "bot": ["chat:write", "im:history", "im:read", "im:write", "users:read", "files:read", "files:write"] }
   },
   "settings": {
     "event_subscriptions": { "bot_events": ["message.im"] },

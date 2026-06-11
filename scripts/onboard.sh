@@ -75,7 +75,7 @@ cat <<EOF
     "app_home": { "messages_tab_enabled": true, "messages_tab_read_only_enabled": false },
     "bot_user": { "display_name": "$NAME", "always_online": true }
   },
-  "oauth_config": { "scopes": { "bot": ["chat:write","im:history","im:read","im:write","users:read"] } },
+  "oauth_config": { "scopes": { "bot": ["chat:write","im:history","im:read","im:write","users:read","files:read","files:write"] } },
   "settings": {
     "event_subscriptions": { "bot_events": ["message.im"] },
     "interactivity": { "is_enabled": false },
