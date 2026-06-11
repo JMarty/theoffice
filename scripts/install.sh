@@ -119,8 +119,27 @@ WantedBy=default.target
 EOF
 
 # ---- 5. enable + start ------------------------------------------------------
-say "Enabling linger + starting services"
-loginctl enable-linger "$USER" 2>/dev/null || warn "could not enable linger (services may not survive logout)"
+# Linger lets the user's systemd instance (user@<uid>.service) start at boot
+# WITHOUT an interactive login — otherwise the fleet only comes up when someone
+# logs in. enable-linger is privileged (polkit/root), so the plain call silently
+# fails under `curl | bash` (no tty). Try sudo first, then verify, then shout.
+say "Enabling linger (so the fleet starts at boot, without login)"
+if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" = "yes" ]; then
+  say "linger already enabled"
+else
+  # enable-linger needs root/polkit; try passwordless sudo, then interactive, then plain.
+  if sudo -n loginctl enable-linger "$USER" 2>/dev/null \
+     || sudo loginctl enable-linger "$USER" 2>/dev/null \
+     || loginctl enable-linger "$USER" 2>/dev/null; then :; fi
+fi
+# verify — do NOT continue silently if it failed
+if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
+  warn "LINGER IS STILL OFF. The fleet will NOT start at boot until you run:"
+  warn "    sudo loginctl enable-linger $USER"
+  warn "Verify with: loginctl show-user $USER | grep Linger   # want: Linger=yes"
+fi
+
+say "Starting services"
 systemctl --user daemon-reload
 systemctl --user enable --now theoffice-tmux.service
 systemctl --user enable --now theoffice.service
