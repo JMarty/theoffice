@@ -45,7 +45,12 @@ export function checkUpdates(): { current: string; behind: number; commits: Pend
  * return so the HTTP response still completes). Agents' tmux sessions survive — the
  * tmux server is a separate unit.
  */
-export function applyUpdate(): { ok: boolean; output: string } {
+export function applyUpdate(opts?: { discardLocal?: boolean }): {
+  ok: boolean;
+  output: string;
+  dirty?: boolean;
+  files?: string[];
+} {
   const out: string[] = [];
   const step = (cmd: string, args: string[]) => {
     out.push(`$ ${cmd} ${args.join(" ")}`);
@@ -56,6 +61,32 @@ export function applyUpdate(): { ok: boolean; output: string } {
       throw new Error(out.join("\n"));
     }
   };
+
+  // A dirty working tree makes `git pull --ff-only` abort with a cryptic "your local changes would be
+  // overwritten" error — the #1 self-host update snag. Detect locally-modified TRACKED files up front
+  // (porcelain, untracked excluded) and surface a clear, actionable result instead of the raw git failure.
+  const dirtyFiles = git(["status", "--porcelain", "--untracked-files=no"])
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => l.slice(3).split(" -> ").pop()!.trim())
+    .filter(Boolean);
+  if (dirtyFiles.length) {
+    if (!opts?.discardLocal) {
+      return {
+        ok: false,
+        dirty: true,
+        files: dirtyFiles,
+        output:
+          `Update blocked — you have local changes to:\n  ${dirtyFiles.join("\n  ")}\n\n` +
+          `These would be overwritten by the update. Either:\n` +
+          `  • use "Discard local changes & update" (saves your edits to git stash, then takes the official version), or\n` +
+          `  • run \`git stash\` in a terminal to set them aside, then retry the update.`,
+      };
+    }
+    // Explicit opt-in: stash (NOT destroy) so the user's edits stay recoverable via `git stash pop`.
+    step("git", ["stash", "push", "-m", "office-update: auto-stash before pull"]);
+  }
+
   step("git", ["pull", "--ff-only", "origin", "main"]);
   step("npm", ["install", "--no-audit", "--no-fund"]);
   step("npm", ["run", "build"]);
