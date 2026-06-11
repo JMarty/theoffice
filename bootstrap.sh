@@ -4,6 +4,10 @@
 # Installs all dependencies, the engine (NO agents/memories — a clean tenant),
 # then launches the guided onboarding wizard. Run as your normal user (it sudo's
 # only for apt). Nothing of the author's data is included.
+#
+# Dashboard binds to localhost by default (safe). To expose it on your LAN
+# (reach it from your phone/laptop), run:
+#   curl -fsSL .../bootstrap.sh | OFFICE_BIND=lan bash
 set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] && { echo "Run as your normal user (it will sudo for apt), NOT as root." >&2; exit 1; }

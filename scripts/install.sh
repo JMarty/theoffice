@@ -74,6 +74,33 @@ if [ ! -f "$TENANT_ROOT/config/overrides.json" ]; then
   fi
 fi
 
+# ---- 3b. dashboard bind: localhost vs LAN -----------------------------------
+# Default 127.0.0.1 (safe — only this machine / SSH tunnel). LAN (0.0.0.0) lets
+# any device on the home network reach it (phone, laptop). Choose via prompt when
+# interactive, or non-interactively with OFFICE_BIND=localhost|lan.
+BIND_HOST="127.0.0.1"
+case "${OFFICE_BIND:-}" in
+  lan|LAN|0.0.0.0) BIND_HOST="0.0.0.0" ;;
+  localhost|127.0.0.1) BIND_HOST="127.0.0.1" ;;
+  "")
+    if [ -t 0 ]; then
+      printf '\nWhere should the dashboard be reachable?\n'
+      printf '  [1] Only this machine (localhost, 127.0.0.1)   [recommended, safer]\n'
+      printf '  [2] The local network too (LAN, 0.0.0.0)        — phone/laptop can reach it\n'
+      read -r -p 'Choice [1]: ' ans
+      [ "$ans" = "2" ] && BIND_HOST="0.0.0.0"
+    else
+      warn "no tty — dashboard will bind localhost only (for LAN access re-run with OFFICE_BIND=lan)"
+    fi
+    ;;
+  *) warn "unrecognized OFFICE_BIND='$OFFICE_BIND' — defaulting to localhost" ;;
+esac
+if [ "$BIND_HOST" = "0.0.0.0" ]; then
+  warn "LAN MODE: the dashboard will be reachable by ANY device on your network."
+  warn "  Data stays protected by the dashboard token, but the page shell loads without it."
+  warn "  The token IS the password — keep it private, and don't do this on untrusted/guest WiFi."
+fi
+
 # ---- 4. systemd --user units ------------------------------------------------
 say "Installing systemd --user units"
 mkdir -p "$UNIT_DIR"
@@ -113,6 +140,7 @@ Environment=NODE_ENV=production
 Environment=TZ=$TZ_VALUE
 Environment=OFFICE_TENANT_ROOT=$TENANT_ROOT
 Environment=OFFICE_TMUX_SOCKET=$SOCKET
+Environment=OFFICE_HOST=$BIND_HOST
 
 [Install]
 WantedBy=default.target
@@ -148,7 +176,12 @@ sleep 2
 PORT="$(node -e "try{const c=require('$TENANT_ROOT/config/overrides.json');process.stdout.write(String((c.web&&c.web.port)||3430))}catch{process.stdout.write('3430')}")"
 TOKEN_FILE="$TENANT_ROOT/store/.dashboard-token"
 say "The Office is up."
-echo "  Dashboard : http://127.0.0.1:$PORT"
+if [ "$BIND_HOST" = "0.0.0.0" ]; then
+  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  echo "  Dashboard : http://${LAN_IP:-<this-machine-ip>}:$PORT   (reachable on your LAN)"
+else
+  echo "  Dashboard : http://127.0.0.1:$PORT   (this machine only)"
+fi
 [ -f "$TOKEN_FILE" ] && echo "  API token : $(cat "$TOKEN_FILE")"
 echo "  Logs      : journalctl --user -u theoffice.service -f"
 echo "  Next      : edit $TENANT_ROOT/config/overrides.json, add agents under tenant/agents/<id>/,"
