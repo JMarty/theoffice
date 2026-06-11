@@ -62,15 +62,28 @@ window.setUsageWin = (w) => {
   window._usageWin = w;
   showTab("usage");
 };
-window.doUpdate = async (btn) => {
-  if (!confirm("Update now? The dashboard rebuilds and briefly restarts — your agents keep running.")) return;
+window.doUpdate = async (btn, discard) => {
+  const ask = discard
+    ? "Discard your local code changes and update?\n\nYour edits are saved to git stash (recoverable with `git stash pop`), then overwritten by the official version."
+    : "Update now? The dashboard rebuilds and briefly restarts — your agents keep running.";
+  if (!confirm(ask)) return;
   btn.disabled = true;
   btn.textContent = "Updating… rebuilding (~30s)";
   try {
-    const r = await post("/api/update/apply", {});
+    const r = await post("/api/update/apply", discard ? { discard: true } : {});
     if (r.ok) {
       btn.textContent = "Updated ✓ — restarting dashboard, reloading…";
       setTimeout(() => location.reload(), 8000);
+    } else if (r.dirty) {
+      // Dirty working tree: explain it plainly and offer a one-click, recoverable discard-and-update.
+      btn.disabled = false;
+      btn.textContent = "⟳ Update now";
+      let box = document.getElementById("upd-dirty");
+      if (!box) { box = document.createElement("div"); box.id = "upd-dirty"; box.className = "updb"; btn.after(box); }
+      box.innerHTML =
+        `<p>⚠ Update blocked — you have local changes to: <code>${esc((r.files || []).join(", "))}</code>. They'd be overwritten.</p>` +
+        `<button onclick="doUpdate(this, true)">Discard local changes &amp; update</button>` +
+        `<p class="muted">Discard saves them to <code>git stash</code> (recoverable). Or run <code>git stash</code> in a terminal to keep them, then retry.</p>`;
     } else {
       btn.disabled = false;
       btn.textContent = "⟳ Update failed — retry";
