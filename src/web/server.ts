@@ -172,10 +172,12 @@ async function handleApi(
   if (path === "/api/update/check" && m === "GET") {
     return json(res, 200, checkUpdates());
   }
-  // POST /api/update/apply — pull + build + restart (engine bounces after the response)
+  // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
+  // A dirty working tree returns {ok:false,dirty:true,files} unless discard:true is sent (auto-stash + pull).
   if (path === "/api/update/apply" && m === "POST") {
+    const b = parseJson(await readBody(req)) ?? {};
     try {
-      return json(res, 200, applyUpdate());
+      return json(res, 200, applyUpdate({ discardLocal: b.discard === true }));
     } catch (e) {
       return json(res, 200, { ok: false, output: String((e as Error).message) });
     }
