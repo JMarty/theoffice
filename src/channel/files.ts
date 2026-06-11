@@ -1,0 +1,56 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { SlackFile } from "./slack-ingest.js";
+import { log } from "../logger.js";
+
+const logger = log("slack-files");
+
+export interface DownloadedFile {
+  name: string;
+  path: string;
+  mimetype: string;
+  ok: boolean;
+}
+
+/**
+ * Download Slack-attached files to the agent's local inbox so its `claude`
+ * session can open them with the Read tool. The private download URL requires
+ * the bot token AND the `files:read` scope; without that scope Slack returns an
+ * HTML login page (not the bytes), which we detect and mark ok=false so the
+ * agent can be told the attachment couldn't be fetched instead of failing silent.
+ */
+export async function downloadFiles(
+  files: SlackFile[],
+  botToken: string,
+  destDir: string,
+  tsPrefix: string
+): Promise<DownloadedFile[]> {
+  if (files.length === 0) return [];
+  mkdirSync(destDir, { recursive: true });
+  const out: DownloadedFile[] = [];
+  for (const f of files) {
+    const safe = (f.name || f.id).replace(/[^A-Za-z0-9._-]/g, "_");
+    const path = join(destDir, `${tsPrefix}-${safe}`);
+    let ok = false;
+    const url = f.urlPrivateDownload;
+    if (url) {
+      try {
+        const resp = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
+        const ct = resp.headers.get("content-type") || "";
+        // Slack serves text/html (a login page) when the token lacks files:read.
+        if (resp.ok && !ct.includes("text/html")) {
+          writeFileSync(path, Buffer.from(await resp.arrayBuffer()), { mode: 0o600 });
+          ok = true;
+        } else {
+          logger.warn({ file: f.name, status: resp.status, ct }, "file download not ok (missing files:read scope?)");
+        }
+      } catch (err) {
+        logger.warn({ file: f.name, err }, "file download failed");
+      }
+    } else {
+      logger.warn({ file: f.name }, "file has no private download url");
+    }
+    out.push({ name: f.name, path, mimetype: f.mimetype, ok });
+  }
+  return out;
+}
