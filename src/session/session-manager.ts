@@ -21,6 +21,25 @@ export function launchAgent(cfg: EngineConfig, agent: AgentDef): boolean {
 }
 
 /**
+ * Launch every enabled agent that isn't already running. Called once at boot so
+ * the fleet comes up on its own after a reboot — without this, a fresh tmux
+ * server (only __keepalive) has no agent sessions and nothing relaunches them,
+ * so inbound messages pile up undelivered until someone clicks "start" in the
+ * dashboard. Idempotent: skips agents whose session already exists. Provider-agnostic:
+ * each agent launches via its own runtime.
+ */
+export function launchEnabledAgents(cfg: EngineConfig): void {
+  const socket = cfg.tmux.socket;
+  let launched = 0;
+  for (const agent of loadAgents(cfg)) {
+    if (!agent.enabled) continue;
+    if (hasSession(socket, sessionNameFor(agent.id))) continue; // already up — leave it
+    if (launchAgent(cfg, agent)) launched++;
+  }
+  logger.info({ launched }, "autostart: launched enabled agents");
+}
+
+/**
  * The single deliverer loop. Drains the inbound queue: for each queued item whose target session is
  * running, hand it to that agent's runtime to deliver. The runtime owns readiness gating and ALL queue
  * bookkeeping (markDelivered / markFailed / requeue); this loop only skips agents that are not running
