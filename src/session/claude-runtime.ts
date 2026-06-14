@@ -6,8 +6,10 @@ import { log } from "../logger.js";
 import { capturePane, clearInput, hasSession, newSession, sendKey, sendText, sessionNameFor } from "./tmux.js";
 import { detectPaneState, decideSubmitFollowup } from "./pane-state.js";
 import { writeAgentSettings } from "./profile.js";
+import { ensureFolderTrusted } from "./trust.js";
 import { markDelivering, markDelivered, markFailed, requeue } from "../queue/index.js";
 import { recordInbound } from "../memory/conversation.js";
+import { recallForPrompt } from "../memory/recall.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 
 /**
@@ -27,6 +29,9 @@ const READY_SAMPLE_GAP_MS = 250; // double-sample idle gap
 const MAX_DELIVERY_ATTEMPTS = 5; // give up + mark failed after this many
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Agents primed with their recalled memory this engine run (see deliverClaude). Resets on restart.
+const primed = new Set<string>();
 
 /**
  * Record where an agent should reply for a channel-sourced message. The `office-say`
@@ -122,6 +127,11 @@ function launchClaude(cfg: EngineConfig, agent: AgentDef): boolean {
   for (const [k, v] of Object.entries(readEnvFile(join(agent.dir, ".env")))) env[k] = v;
   // regenerate the agent's security profile (connector + filesystem deny) before launch
   writeAgentSettings(cfg, agent);
+  // pre-accept Claude's folder-trust gate; otherwise a fresh pane blocks on the
+  // interactive "trust this folder?" prompt forever and never reaches idle, so
+  // the deliverer can never hand it a message (and --dangerously-skip-permissions
+  // does NOT bypass that prompt). Idempotent.
+  ensureFolderTrusted(agent.dir);
   const ok = newSession(cfg.tmux.socket, session, { cwd: agent.dir, command, env });
   logger.info({ agent: agent.id, session, ok }, ok ? "launched agent" : "launch skipped (exists?)");
   return ok;
@@ -140,11 +150,26 @@ async function deliverClaude(cfg: EngineConfig, agent: AgentDef, item: QueuedIte
     writeReplyContext(cfg, item.agent_id, item.reply_channel);
   }
   markDelivering(item.id);
-  const res = await deliverPrompt(socket, session, wrapForDelivery(item.source, item.prompt));
+  // First message delivered to each agent this engine run gets a recalled-memory preamble
+  // (hot+warm always, cold/shared by topic) so a fresh session doesn't start blank; later
+  // messages skip it because the live session still holds the context. `primed` resets on
+  // engine restart — exactly when a "new session" effectively begins — so it re-primes.
+  let text = wrapForDelivery(item.source, item.prompt);
+  const prime = !primed.has(item.agent_id);
+  if (prime) {
+    try {
+      const mem = recallForPrompt(item.agent_id, item.prompt);
+      if (mem) text = `${mem}\n\n${text}`;
+    } catch (err) {
+      logger.warn({ agent: item.agent_id, err }, "memory recall failed (delivering without)");
+    }
+  }
+  const res = await deliverPrompt(socket, session, text);
   if (res.ok) {
+    primed.add(item.agent_id);
     markDelivered(item.id);
     recordInbound(item.agent_id, item.reply_channel, item.prompt);
-    logger.info({ id: item.id, agent: item.agent_id, source: item.source }, "delivered");
+    logger.info({ id: item.id, agent: item.agent_id, source: item.source, primed: prime }, "delivered");
   } else if (res.reason === "wedged") {
     markFailed(item.id, "session wedged (thinking-block error)");
     logger.warn({ id: item.id, agent: item.agent_id }, "agent wedged — needs reset");
