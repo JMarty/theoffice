@@ -13,8 +13,10 @@ import {
 } from "./tmux.js";
 import { detectPaneState, decideSubmitFollowup } from "./pane-state.js";
 import { writeAgentSettings } from "./profile.js";
+import { ensureFolderTrusted } from "./trust.js";
 import { listQueued, markDelivering, markDelivered, markFailed, requeue } from "../queue/index.js";
 import { recordInbound } from "../memory/conversation.js";
+import { loadAgents } from "../agents.js";
 
 const logger = log("session");
 
@@ -129,9 +131,32 @@ export function launchAgent(cfg: EngineConfig, agent: AgentDef): boolean {
   for (const [k, v] of Object.entries(readEnvFile(join(agent.dir, ".env")))) env[k] = v;
   // regenerate the agent's security profile (connector + filesystem deny) before launch
   writeAgentSettings(cfg, agent);
+  // pre-accept Claude's folder-trust gate; otherwise a fresh pane blocks on the
+  // interactive "trust this folder?" prompt forever and never reaches idle, so
+  // the deliverer can never hand it a message (and --dangerously-skip-permissions
+  // does NOT bypass that prompt). Idempotent.
+  ensureFolderTrusted(agent.dir);
   const ok = newSession(cfg.tmux.socket, session, { cwd: agent.dir, command, env });
   logger.info({ agent: agent.id, session, ok }, ok ? "launched agent" : "launch skipped (exists?)");
   return ok;
+}
+
+/**
+ * Launch every enabled agent that isn't already running. Called once at boot so
+ * the fleet comes up on its own after a reboot — without this, a fresh tmux
+ * server (only __keepalive) has no agent sessions and nothing relaunches them,
+ * so inbound messages pile up undelivered until someone clicks "start" in the
+ * dashboard. Idempotent: skips agents whose session already exists.
+ */
+export function launchEnabledAgents(cfg: EngineConfig): void {
+  const socket = cfg.tmux.socket;
+  let launched = 0;
+  for (const agent of loadAgents(cfg)) {
+    if (!agent.enabled) continue;
+    if (hasSession(socket, sessionNameFor(agent.id))) continue; // already up — leave it
+    if (launchAgent(cfg, agent)) launched++;
+  }
+  logger.info({ launched }, "autostart: launched enabled agents");
 }
 
 /**
