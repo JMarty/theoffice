@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.js";
 import { openDb, closeDb } from "./db/index.js";
-import { startDeliverer } from "./session/session-manager.js";
+import { startDeliverer, launchEnabledAgents } from "./session/session-manager.js";
 import { startSlackIngest } from "./channel/slack-ingest.js";
 import { startSlackSender } from "./channel/slack-send.js";
 import { startScheduler } from "./scheduler/index.js";
@@ -23,6 +23,11 @@ async function main(): Promise<void> {
 
   // Phase 2: the single inbound-queue deliverer (only writer to a tmux pane).
   stops.push(startDeliverer(cfg));
+
+  // Phase 2b: bring the fleet up. After a reboot the tmux server is fresh (only
+  // __keepalive) and nothing else relaunches agents, so without this the
+  // deliverer has no sessions to deliver to and the inbound queue piles up.
+  launchEnabledAgents(cfg);
 
   // Phase 3: Slack channel — external ingest + per-agent-identity outbound.
   if (cfg.channel.provider === "slack") {
