@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { SocketModeClient } from "@slack/socket-mode";
+import { WebClient } from "@slack/web-api";
 import type { EngineConfig } from "../types.js";
 import { loadAgents, slackAgents } from "../agents.js";
 import { enqueueInbound } from "../queue/index.js";
@@ -114,6 +115,8 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
   const clients: SocketModeClient[] = [];
   for (const agent of agents) {
     const sm = new SocketModeClient({ appToken: agent.slack!.appToken! });
+    // Reuse one Web client per agent for the "seen" 👀 reaction (reactions:write).
+    const web = agent.slack!.botToken ? new WebClient(agent.slack!.botToken) : null;
 
     sm.on("message", async (args: { ack?: () => Promise<void>; event?: unknown; body?: { event?: unknown } }) => {
       if (args.ack) {
@@ -130,6 +133,13 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
         logger.warn({ agent: agent.id, from: parsed.user }, "ignored DM from non-allowed user");
         return;
       }
+      // Instant "I've seen this" feedback so the owner isn't left wondering — react
+      // 👀 the moment we accept the message, well before the agent finishes thinking.
+      // Best-effort: a missing reactions:write scope or an already-reacted message
+      // must never block delivery.
+      web?.reactions
+        .add({ channel: parsed.channel, timestamp: parsed.ts, name: "eyes" })
+        .catch((err: unknown) => logger.debug({ agent: agent.id, err }, "seen-reaction failed"));
       const prompt = await buildPrompt(parsed, agent.dir, agent.slack!.botToken!);
       const id = enqueueInbound({
         agentId: agent.id,
