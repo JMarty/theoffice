@@ -56,6 +56,24 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+export let _now = () => Date.now();
+export function _setClock(fn: () => number) { _now = fn; }
+
+interface RLEntry {
+  fails: number;
+  blockedUntil: number;
+  lastFail: number;
+}
+const rlMap = new Map<string, RLEntry>();
+
+function getClientIp(req: IncomingMessage): string {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string") {
+    return xff.split(",")[0]?.trim() || "unknown";
+  }
+  return req.socket.remoteAddress || "unknown";
+}
+
 export function startServer(cfg: EngineConfig): () => void {
   const token = getOrCreateToken(cfg.paths.dashboardTokenFile);
 
@@ -63,9 +81,42 @@ export function startServer(cfg: EngineConfig): () => void {
     const url = new URL(req.url ?? "/", `http://${cfg.web.host}:${cfg.web.port}`);
     const path = url.pathname;
     if (path.startsWith("/api/")) {
+      const ip = getClientIp(req);
+      const rl = cfg.web.rateLimit || { maxFails: 5, windowMs: 900000, blockMs: 3600000 };
+      const nowMs = _now();
+      
+      let existing = rlMap.get(ip);
+      if (existing && existing.blockedUntil > nowMs) {
+        res.setHeader("Retry-After", Math.ceil((existing.blockedUntil - nowMs) / 1000).toString());
+        return json(res, 429, { error: "too many attempts" });
+      }
+
       if (!checkBearer(req.headers.authorization, token)) {
+        const entry: RLEntry = (!existing || (nowMs - existing.lastFail) > rl.windowMs)
+          ? { fails: 0, blockedUntil: 0, lastFail: nowMs }
+          : existing;
+        
+        entry.fails++;
+        entry.lastFail = nowMs;
+        if (entry.fails >= rl.maxFails) {
+          entry.blockedUntil = nowMs + rl.blockMs;
+        }
+        
+        if (rlMap.size > 10000) {
+          for (const [k, v] of rlMap.entries()) {
+            if (v.blockedUntil <= nowMs && (nowMs - v.lastFail) > rl.windowMs) {
+              rlMap.delete(k);
+            }
+          }
+        }
+        rlMap.set(ip, entry);
         return json(res, 401, { error: "unauthorized" });
       }
+
+      if (existing) {
+        rlMap.delete(ip);
+      }
+
       try {
         return await handleApi(cfg, req, res, path, url);
       } catch (err) {
