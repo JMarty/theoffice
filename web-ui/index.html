@@ -4,35 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>The Office — Mission Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <header>
-      <h1>The Office <span class="sub">mission control</span></h1>
-      <div id="tokrow" class="tokrow">
-        <input id="token" type="password" placeholder="dashboard API token" />
-        <button id="save">Connect</button>
-        <span id="conn" class="muted"></span>
-      </div>
-    </header>
+    <!-- Token gate (shown until a valid token connects) -->
+    <div id="gate">
+      <div class="brand-lg">The Office</div>
+      <span class="ml">Mission Control</span>
+      <input id="token" type="password" placeholder="dashboard token" autocomplete="off" />
+      <button id="save">Connect</button>
+      <div class="err" id="gate-err"></div>
+    </div>
 
-    <main>
-      <section id="overview" class="cards"></section>
-
-      <nav class="tabs">
-        <button data-tab="agents" class="active">Agents</button>
-        <button data-tab="memories">Memory</button>
-        <button data-tab="kanban">Kanban</button>
-        <button data-tab="schedules">Schedules</button>
-        <button data-tab="queue">Queue</button>
-        <button data-tab="messages">Messages</button>
-        <button data-tab="usage">Usage</button>
-        <button data-tab="logs">Logs</button>
-        <button data-tab="updates">⟳ Update</button>
-      </nav>
-
-      <section id="panel"></section>
-    </main>
+    <!-- App shell (built by app.js) -->
+    <div id="app" class="hidden">
+      <header><div class="hwrap" id="hwrap"></div></header>
+      <main class="page">
+        <div class="strip" id="strip"></div>
+        <nav class="tabs" id="tabs"></nav>
+        <div id="panel"></div>
+      </main>
+    </div>
 
     <script src="/app.js"></script>
   </body>

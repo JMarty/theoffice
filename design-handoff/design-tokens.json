@@ -1,0 +1,102 @@
+{
+  "$comment": "The Office — Mission Control. Design tokens. Theme is driven by CSS custom properties set on a single root element; everything else reads var(--token). accentSoft = accent at the given alpha; accentLine = accent at the given alpha (used for pulsing-dot rings).",
+
+  "fonts": {
+    "ui": "'IBM Plex Sans', system-ui, sans-serif",
+    "mono": "'IBM Plex Mono', monospace",
+    "googleFontsImport": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap",
+    "baseSize": "14px",
+    "baseLineHeight": 1.45,
+    "notes": "Mono is used for ALL labels (uppercase, letter-spacing .1–.18em), numeric metrics, IDs, @handles, timestamps and log lines. Sans for everything else."
+  },
+
+  "theme": {
+    "dark": {
+      "bg": "#0b0c0e",
+      "bg2": "#0f1113",
+      "surface": "#151719",
+      "surface2": "#1c1f23",
+      "border": "#23262b",
+      "border2": "#34383e",
+      "text": "#e9ebee",
+      "dim": "#9aa1a8",
+      "faint": "#646a70"
+    },
+    "light": {
+      "bg": "#f3f4f6",
+      "bg2": "#eaecef",
+      "surface": "#ffffff",
+      "surface2": "#f6f7f9",
+      "border": "#e4e7ea",
+      "border2": "#d3d7db",
+      "text": "#15181b",
+      "dim": "#5c636a",
+      "faint": "#929aa1"
+    }
+  },
+
+  "semantic": {
+    "$comment": "Status / meaning colors. Same role in both themes; values differ for contrast.",
+    "dark":  { "ok": "#3ddc91", "warn": "#f5b14c", "danger": "#f6776b", "info": "#6ea8ff" },
+    "light": { "ok": "#0f9d63", "warn": "#bd7a08", "danger": "#d6453a", "info": "#2f6fe0" }
+  },
+
+  "accent": {
+    "$comment": "Brand accent. User-selectable. Only affects: active nav, primary buttons, brand logo, highlights, live-tick dots. Does NOT replace semantic colors.",
+    "green":  { "dark": "#3ddc91", "light": "#0f9d63" },
+    "blue":   { "dark": "#6ea8ff", "light": "#2f6fe0" },
+    "amber":  { "dark": "#f5b14c", "light": "#bd7a08" },
+    "violet": { "dark": "#b69bff", "light": "#6f51e6" },
+    "default": "green",
+    "accentSoftAlpha": { "dark": 0.16, "light": 0.12 },
+    "accentLineAlpha": { "dark": 0.45, "light": 0.35 }
+  },
+
+  "agentColors": {
+    "$comment": "Per-agent identity color used for monogram coins, kanban left-borders, memory/message author chips, usage bars. Configurable per agent.",
+    "zeus": "#b69bff",
+    "hermes": "#6ea8ff",
+    "hestia": "#3ddc91",
+    "argus": "#f5b14c"
+  },
+
+  "statusColorMap": {
+    "$comment": "Maps agent runtime status -> semantic color + whether the status dot pulses.",
+    "running":    { "color": "info",   "pulse": true },
+    "idle":       { "color": "ok",     "pulse": false },
+    "unknown":    { "color": "warn",   "pulse": false },
+    "offline":    { "color": "danger", "pulse": false },
+    "restarting": { "color": "accent", "pulse": true },
+    "disabled":   { "color": "faint",  "pulse": false }
+  },
+
+  "radius": {
+    "card": "16px",
+    "panel": "14px",
+    "inner": "10px",
+    "control": "8px",
+    "pill": "20px",
+    "coin": "11px"
+  },
+
+  "spacing": {
+    "comfortable": { "cardPadding": "18px", "gridGap": "15px", "agentCardMin": "312px" },
+    "compact":     { "cardPadding": "13px", "gridGap": "10px", "agentCardMin": "272px" },
+    "pageMaxWidth": "1480px",
+    "pagePadding": "24px 28px 64px",
+    "headerPadding": "13px 28px"
+  },
+
+  "elevation": {
+    "$comment": "No drop shadows in the base design. Separation comes from surface vs bg + 1px borders. Running agent card in Variation B uses a subtle accent ring; not required for A.",
+    "card": "1px solid var(--border)"
+  },
+
+  "motion": {
+    "pulseDot": "@keyframes pulseDot { 0% { box-shadow: 0 0 0 0 var(--dc); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }  — applied as: animation: pulseDot 1.6s ease-out infinite; with --dc set to the dot color at ~0.55 alpha",
+    "blink": "@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: .35 } } — log cursor, 1.1s steps(1) infinite",
+    "tickInterval": "1000ms — updates live clock, running-agent elapsed timer, and running-agent token counter",
+    "restartDelay": "1700ms — restarting -> idle transition",
+    "opacityTransition": "0.2s — disabled card dim"
+  }
+}
