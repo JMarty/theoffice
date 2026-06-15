@@ -10,8 +10,9 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <!-- Token gate (shown until a valid token connects) -->
-    <div id="gate">
+    <!-- Token gate — hidden by default so a saved-token session doesn't flash it; app.js
+         reveals it only when there is no token or the token fails. -->
+    <div id="gate" class="hidden">
       <div class="brand-lg">The Office</div>
       <span class="ml">Mission Control</span>
       <input id="token" type="password" placeholder="dashboard token" autocomplete="off" />
