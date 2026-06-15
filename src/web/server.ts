@@ -526,6 +526,13 @@ function serveStatic(res: ServerResponse, path: string): void {
     return;
   }
   const body = readFileSync(file);
-  res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+  // No-store on the app shell so a dashboard fix (app.js/style.css/index.html) reaches the
+  // browser immediately instead of running a stale cached copy — a stale app.js kept re-locking
+  // the owner on the rate limiter. Static assets here are tiny + single-user, so skipping the
+  // cache costs nothing.
+  res.writeHead(200, {
+    "content-type": MIME[extname(file)] ?? "application/octet-stream",
+    "cache-control": "no-store, must-revalidate",
+  });
   res.end(body);
 }
