@@ -328,9 +328,11 @@ const TABS = {
     const wins = [["1h", "1h"], ["24h", "24h"], ["3d", "3d"], ["7d", "7d"], ["restart", "since restart"], ["all", "all"]];
     const d = await api("/api/usage?window=" + win);
     const fmt = (n) => (n || 0).toLocaleString();
+    // non-Claude runtimes (codex/gemini) keep no transcripts → usage is unmeasurable, show "n/a" not 0
+    const cell = (x, n) => x.tracked === false ? "n/a" : fmt(n);
     const btns = `<div class="ctl">` + wins.map(([v, l]) => `<button class="winbtn${v === win ? " active" : ""}" onclick="setUsageWin('${v}')">${l}</button>`).join("") + `</div>`;
-    const tot = d.usage.reduce((a, x) => ({ o: a.o + x.output, i: a.i + x.input, t: a.t + x.turns, cr: a.cr + x.cacheRead, cc: a.cc + x.cacheWrite }), { o: 0, i: 0, t: 0, cr: 0, cc: 0 });
-    const body = d.usage.map((x) => [esc(x.displayName), fmt(x.turns), fmt(x.output), fmt(x.input), fmt(x.cacheRead), fmt(x.cacheWrite)]);
+    const tot = d.usage.filter((x) => x.tracked !== false).reduce((a, x) => ({ o: a.o + x.output, i: a.i + x.input, t: a.t + x.turns, cr: a.cr + x.cacheRead, cc: a.cc + x.cacheWrite }), { o: 0, i: 0, t: 0, cr: 0, cc: 0 });
+    const body = d.usage.map((x) => [esc(x.displayName), cell(x, x.turns), cell(x, x.output), cell(x, x.input), cell(x, x.cacheRead), cell(x, x.cacheWrite)]);
     body.push([`<b>TOTAL</b>`, `<b>${fmt(tot.t)}</b>`, `<b>${fmt(tot.o)}</b>`, `<b>${fmt(tot.i)}</b>`, `<b>${fmt(tot.cr)}</b>`, `<b>${fmt(tot.cc)}</b>`]);
     return btns + `<p class="muted">window: <b>${esc(win)}</b> · output tokens = the headline figure (flat-rate subscription — usage signal, not billed per token)</p>` +
       rows(["Agent", "Turns", "Output", "Input", "Cache read", "Cache write"], body, true);
