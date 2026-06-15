@@ -117,6 +117,7 @@ let AGENTLIST = [], AGENTS = {}, OVERVIEW = {}, USAGE = {}, HOST = {}, SCHEDULES
 let RUNTIMES = [{ id: "claude", label: "Claude Code", models: [] }];
 let MAX_CODEX = 2;
 let CURRENT_TAB = "agents";
+let CONNECTED = false;             // gate auth state — polling only runs once authenticated
 const RESTARTING = new Set();      // agent ids in optimistic restart
 const RUN_SINCE = {};              // agent id -> ms first observed running (client-side elapsed)
 
@@ -630,18 +631,28 @@ async function softRefresh() {
   if (CURRENT_TAB === "agents") await showTab("agents");
 }
 async function poll() {
-  try { await softRefresh(); } catch { /* transient */ }
+  if (!CONNECTED) return; // never hit the API (and never burn rate-limit strikes) while on the gate
+  try { await softRefresh(); }
+  catch (e) {
+    if (/unauthorized|rate limited/i.test(e.message)) { CONNECTED = false; showGate(e.message); }
+  }
 }
 
 // ---------------- connect / gate ----------------
 function showGate(msg) {
+  CONNECTED = false;
   $("#app").classList.add("hidden");
   $("#gate").classList.remove("hidden");
   if (msg) $("#gate-err").textContent = msg;
 }
 async function connect() {
   try {
+    // Single auth probe FIRST: a wrong token costs exactly one rate-limit strike,
+    // not a burst (refreshData fans out to ~6 parallel calls — which would otherwise
+    // spend 6 strikes and lock the user out on a single fat-fingered attempt).
+    await api("/api/agents");
     await refreshData();
+    CONNECTED = true;
     $("#gate").classList.add("hidden");
     $("#app").classList.remove("hidden");
     renderHeader(); renderStrip(); renderTabs();
