@@ -84,6 +84,19 @@ export function markFailed(id: number, err: string): void {
   getDb().prepare(`UPDATE inbound_queue SET status='failed', last_error=? WHERE id=?`).run(err, id);
 }
 
+/**
+ * Boot recovery: re-queue any items orphaned in 'delivering'. markDelivering flips an item to
+ * 'delivering' BEFORE the async turn runs, so a crash/restart mid-turn (incl. the routine self-update
+ * restart) leaves it stuck there forever — never retried, never failed, never surfaced ("I DM'd it, it
+ * never answered"). Run once at boot, before the deliverer starts, while exactly one writer exists (so it
+ * is race-free). The attempt charged by markDelivering is kept, so a genuinely poisonous item still hits
+ * MAX_DELIVERY_ATTEMPTS and fails instead of looping forever. Returns how many rows were recovered.
+ */
+export function requeueStaleDelivering(): number {
+  const r = getDb().prepare(`UPDATE inbound_queue SET status='queued' WHERE status='delivering'`).run();
+  return r.changes;
+}
+
 // ---- outbound (agent -> Slack) ----
 
 export function enqueueOutbound(agentId: string, channel: string, text: string): number {
@@ -114,5 +127,16 @@ export function markOutboundSent(id: number): void {
 export function markOutboundFailed(id: number, err: string): void {
   getDb()
     .prepare(`UPDATE outbound_queue SET status=CASE WHEN attempts>=5 THEN 'failed' ELSE 'queued' END, attempts=attempts+1, last_error=? WHERE id=?`)
+    .run(err, id);
+}
+
+/**
+ * Mark an outbound message permanently failed immediately — for Slack errors that retrying can never fix
+ * (channel_not_found, invalid_auth, ...). Without this, a permanent error would re-queue 5× and waste a
+ * send each tick on a message that can never go out.
+ */
+export function failOutbound(id: number, err: string): void {
+  getDb()
+    .prepare(`UPDATE outbound_queue SET status='failed', attempts=attempts+1, last_error=? WHERE id=?`)
     .run(err, id);
 }

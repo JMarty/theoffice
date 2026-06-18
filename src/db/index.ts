@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { chmodSync, existsSync, mkdirSync, openSync, closeSync } from "node:fs";
 import { dirname } from "node:path";
 import { SCHEMA_SQL } from "./schema.js";
+import { runMigrations } from "./migrate.js";
 import { log } from "../logger.js";
 
 const logger = log("db");
@@ -36,7 +37,11 @@ export function openDb(dbFile: string): DB {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
 
+  // A DB with no core table yet is a fresh install: SCHEMA_SQL below builds the current schema, so it
+  // skips migrations and just stamps user_version. An existing DB runs any pending migrations instead.
+  const fresh = !db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'`).get();
   db.exec(SCHEMA_SQL);
+  runMigrations(db, fresh);
 
   logger.info({ dbFile }, "database ready (WAL)");
   handle = db;

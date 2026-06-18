@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
 import { openDb, closeDb } from "./db/index.js";
+import { requeueStaleDelivering } from "./queue/index.js";
 import { startDeliverer, launchEnabledAgents } from "./session/session-manager.js";
 import { startSlackIngest } from "./channel/slack-ingest.js";
 import { startSlackSender } from "./channel/slack-send.js";
@@ -18,6 +19,11 @@ async function main(): Promise<void> {
   );
 
   openDb(cfg.paths.dbFile);
+
+  // Boot recovery: rescue any queue items orphaned in 'delivering' by a previous crash/restart (incl. the
+  // self-update restart). Must run AFTER openDb and BEFORE the deliverer starts, while no other writer exists.
+  const recovered = requeueStaleDelivering();
+  if (recovered > 0) logger.warn({ recovered }, "boot: re-queued items orphaned in 'delivering'");
 
   const stops: Array<() => void> = [];
 
