@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Office — kód-audit (2026-06-17)</title>
+<style>
+  :root{
+    --bg:#0a0d13; --panel:#11161f; --panel2:#141b26; --border:#222b3a;
+    --text:#c9d4e3; --muted:#7c8aa0; --accent:#5b9dff;
+    --p0:#ff5c5c; --p1:#ffb454; --p2:#5b9dff; --p3:#8b97ad;
+    --high:#ff5c5c; --medium:#ffb454; --low:#3fb950; --nit:#6e7a8f;
+    --green:#3fb950;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#16243d33,transparent),var(--bg);
+    color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif;}
+  code{font-family:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;font-size:.84em;
+    background:#0c1d2e;color:#8fd3ff;padding:1px 5px;border-radius:5px;border:1px solid #14304a;white-space:nowrap}
+  a{color:var(--accent);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 22px 90px}
+
+  header.top{position:sticky;top:0;z-index:30;backdrop-filter:blur(12px);
+    background:linear-gradient(180deg,#0a0d13ee,#0a0d13cc);border-bottom:1px solid var(--border)}
+  .head-in{max-width:1180px;margin:0 auto;padding:14px 22px 0}
+  h1{margin:0;font-size:21px;letter-spacing:.2px}
+  h1 .sub{color:var(--muted);font-weight:500;font-size:14px}
+  .verdict{margin:8px 0 0;color:var(--muted);font-size:13.5px;max-width:960px}
+  .verdict b{color:var(--text)}
+
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin:13px 0 2px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:9px 14px;min-width:92px;transition:.15s}
+  .stat.click{cursor:pointer}
+  .stat.click:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .stat .n{font-size:21px;font-weight:700;line-height:1}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:5px}
+  .stat.p0 .n{color:var(--p0)} .stat.p1 .n{color:var(--p1)} .stat.p2 .n{color:var(--p2)} .stat.p3 .n{color:var(--p3)}
+
+  .statusbar{display:flex;flex-wrap:wrap;gap:8px;margin:11px 0 12px;font-size:12.5px}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:999px;padding:4px 11px;color:var(--muted)}
+  .chip b{color:var(--text);font-weight:600}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .ok{background:var(--green)} .warn{background:var(--medium)} .bad{background:var(--high)}
+
+  .headrow{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+  nav.tabs{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+  nav.tabs button{background:transparent;border:1px solid transparent;color:var(--muted);
+    padding:9px 16px;border-radius:10px 10px 0 0;font-size:14px;cursor:pointer;font-weight:600}
+  nav.tabs button:hover{color:var(--text)}
+  nav.tabs button.active{color:var(--text);background:var(--panel);border-color:var(--border);border-bottom-color:var(--panel)}
+  .devtoggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);padding-bottom:8px;cursor:pointer;user-select:none}
+  .devtoggle input{display:none}
+  .switch{width:38px;height:21px;border-radius:999px;background:#2a3548;position:relative;transition:.2s}
+  .switch::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#9fb0c8;top:3px;left:3px;transition:.2s}
+  .devtoggle input:checked + .switch{background:var(--accent)}
+  .devtoggle input:checked + .switch::after{left:20px;background:#06101f}
+  .devtoggle b{color:var(--text)}
+
+  section.tab{display:none;padding-top:22px}
+  section.tab.active{display:block}
+
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;
+    position:sticky;top:150px;z-index:20;background:linear-gradient(180deg,var(--bg) 72%,transparent);padding:6px 0}
+  .pills{display:flex;gap:5px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:4px;flex-wrap:wrap}
+  .pills button{background:transparent;border:0;color:var(--muted);padding:6px 11px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600}
+  .pills button.on{background:var(--panel2);color:var(--text);box-shadow:inset 0 0 0 1px var(--border)}
+  .pills button.on[data-p="P0"]{color:var(--p0)} .pills button.on[data-p="P1"]{color:var(--p1)}
+  .pills button.on[data-p="P2"]{color:var(--p2)} .pills button.on[data-p="P3"]{color:var(--p3)}
+  .pills button.on[data-s="HIGH"]{color:var(--high)} .pills button.on[data-s="MEDIUM"]{color:var(--medium)}
+  .pills button.on[data-s="LOW"]{color:var(--low)} .pills button.on[data-s="NIT"]{color:var(--nit)}
+  select,input[type=search]{background:var(--panel);border:1px solid var(--border);color:var(--text);
+    border-radius:9px;padding:8px 11px;font-size:13.5px;font-family:inherit}
+  input[type=search]{min-width:200px;flex:1}
+  .controls .right{margin-left:auto;display:flex;gap:14px;align-items:center;color:var(--muted);font-size:13px}
+  .linkbtn{background:none;border:0;color:var(--accent);cursor:pointer;font-size:13px;font-weight:600}
+
+  .count{color:var(--muted);font-size:13px;margin:0 0 12px}
+  .card{background:var(--panel);border:1px solid var(--border);border-left-width:4px;border-radius:12px;margin-bottom:12px;overflow:hidden}
+  .card[data-p="P0"]{border-left-color:var(--p0)} .card[data-p="P1"]{border-left-color:var(--p1)}
+  .card[data-p="P2"]{border-left-color:var(--p2)} .card[data-p="P3"]{border-left-color:var(--p3)}
+  .card-h{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;cursor:pointer}
+  .card-h:hover{background:#ffffff05}
+  .idx{font-variant-numeric:tabular-nums;color:var(--muted);font-weight:700;font-size:13px;min-width:30px;padding-top:2px}
+  .card-main{flex:1;min-width:0}
+  .card-title{font-weight:600;font-size:15.5px}
+  .loc{margin-top:5px;font-size:12.5px;color:var(--muted)}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-left:auto;padding-top:1px}
+  .b{font-size:11px;font-weight:700;letter-spacing:.4px;padding:3px 9px;border-radius:999px;white-space:nowrap;text-transform:uppercase}
+  .b.sev-HIGH{background:#ff5c5c22;color:var(--high);border:1px solid #ff5c5c44}
+  .b.sev-MEDIUM{background:#ffb45422;color:var(--medium);border:1px solid #ffb45444}
+  .b.sev-LOW{background:#3fb95022;color:var(--low);border:1px solid #3fb95044}
+  .b.sev-NIT{background:#6e7a8f22;color:var(--nit);border:1px solid #6e7a8f44}
+  .b.cat{background:#5b9dff18;color:#9cc4ff;border:1px solid #5b9dff33}
+  .b.eff{background:#11161f;color:var(--muted);border:1px solid var(--border)}
+  .b.changed{background:#0c1d2e;color:#8fd3ff;border:1px dashed #2a5378}
+  .chev{color:var(--muted);transition:.2s;padding-top:2px}
+  .card.open .chev{transform:rotate(90deg)}
+  .card-body{display:none;padding:4px 16px 18px 58px;border-top:1px solid var(--border)}
+  .card.open .card-body{display:block}
+
+  .kv{margin:14px 0 0}
+  .kv .k{font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px;font-weight:700;display:flex;align-items:center;gap:6px}
+  .kv .v{font-size:14.5px;color:#dde6f2;line-height:1.62}
+  .kv.plain .k{color:#9fe0c0}
+  .kv.tech .k{color:#9cc4ff}
+  .kv.fix .k{color:#7fe0a0}
+  .symptom{margin:13px 0 0;background:#1a1410;border:1px solid #4a2f1a;border-radius:9px;padding:10px 13px;font-size:13.5px;color:#f0d3b8}
+  .symptom b{color:#ffb454}
+  .dev{margin-top:6px;border-top:1px dashed var(--border);padding-top:2px}
+  body.hide-dev .dev{display:none}
+  .devhint{display:none;margin-top:12px;font-size:12.5px;color:var(--muted);font-style:italic}
+  body.hide-dev .card.open .devhint{display:block}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}.controls{top:176px}}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .panel h3{margin:0 0 12px;font-size:15px}
+  .panel p{margin:0 0 10px;color:#c2cdde}
+  .panel p:last-child{margin-bottom:0}
+  .legend{display:flex;flex-direction:column;gap:10px}
+  .lg{display:grid;grid-template-columns:54px 1fr;gap:12px;align-items:start;font-size:13.5px}
+  .lg .pill{font-size:11px;font-weight:800;text-align:center;padding:4px 0;border-radius:7px}
+  .lg .pill.P0{background:#ff5c5c22;color:var(--p0)} .lg .pill.P1{background:#ffb45422;color:var(--p1)}
+  .lg .pill.P2{background:#5b9dff22;color:var(--p2)} .lg .pill.P3{background:#8b97ad22;color:var(--p3)}
+  .lg .pill.HIGH{background:#ff5c5c22;color:var(--high)} .lg .pill.MED{background:#ffb45422;color:var(--medium)}
+  .lg .pill.LOW{background:#3fb95022;color:var(--low)} .lg .pill.NIT{background:#6e7a8f22;color:var(--nit)}
+  .lg b{color:var(--text)}
+  .catbars{display:flex;flex-direction:column;gap:9px}
+  .catbar{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:10px;font-size:13px}
+  .catbar .bar{height:9px;border-radius:6px;background:linear-gradient(90deg,#5b9dff,#3fb0ff);min-width:3px}
+  .catbar .cn{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.cols2{grid-template-columns:1fr}}
+  .col h3{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:15px}
+  .li{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 14px;margin-bottom:9px}
+  .li .t{font-weight:600;font-size:14px}
+  .li .d{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .li.fixed{border-left:3px solid var(--green)}
+  .li.open{border-left:3px solid var(--medium)}
+  .tag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;margin-left:6px}
+  .tag.g{background:#3fb95022;color:var(--green)} .tag.a{background:#ffb45422;color:var(--medium)}
+  .tag.r{background:#ff5c5c22;color:var(--high)} .tag.b{background:#5b9dff22;color:var(--accent)}
+
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  ol.steps li{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:14px 16px 14px 56px;
+    position:relative;margin-bottom:11px}
+  ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+    width:28px;height:28px;border-radius:50%;background:var(--accent);color:#06101f;font-weight:800;
+    display:flex;align-items:center;justify-content:center;font-size:14px}
+  ol.steps li b{color:#fff}
+  ul.qw{list-style:none;padding:0;margin:0}
+  ul.qw li{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 14px;margin-bottom:9px;
+    display:flex;gap:10px;align-items:baseline}
+  ul.qw li::before{content:"⚡";flex:0 0 auto}
+  .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:30px}
+  .empty{color:var(--muted);text-align:center;padding:40px;font-size:14px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="head-in">
+    <h1>The Office — kód-audit &amp; akcióterv <span class="sub">· 2026-06-17 · branch <code>feat/gemini-runtime</code></span></h1>
+    <p class="verdict"><b>A kód érdemben egészséges.</b> Nincs kritikus biztonsági hiba (egytulajdonos, megbízható gép). A fő gyengeség nem biztonsági, hanem <b>megbízhatósági</b>: az agenteket meghajtó háttérprogramok (codex/gemini) néhány ponton némán elnyelhetnek egy üzenetet vagy beragadhatnak — „megkapta, de nem reagált” típusú hibák, amiket csak motor-újraindítás old.</p>
+    <div class="stats" id="stats"></div>
+    <div class="statusbar">
+      <span class="chip"><span class="dot ok"></span>fordítás (tsc) tiszta · 0 hiba</span>
+      <span class="chip"><span class="dot ok"></span><b>59</b> teszt zöld</span>
+      <span class="chip"><span class="dot ok"></span>build tiszta</span>
+      <span class="chip"><span class="dot warn"></span>1 db „high” csomag-figyelmeztetés (befoltozható)</span>
+      <span class="chip"><span class="dot bad"></span>nincs automata minőség-kapu (CI)</span>
+    </div>
+    <div class="headrow">
+      <nav class="tabs" id="tabs">
+        <button data-tab="overview" class="active">Áttekintés</button>
+        <button data-tab="findings">Találatok</button>
+        <button data-tab="prior">Korábbi audithoz képest</button>
+        <button data-tab="plan">Terv &amp; quick wins</button>
+      </nav>
+      <label class="devtoggle"><input type="checkbox" id="devChk" checked><span class="switch"></span><b>Fejlesztői részletek</b></label>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- OVERVIEW -->
+  <section class="tab active" id="overview">
+    <div class="panel">
+      <h3>Hogyan olvasd ezt</h3>
+      <p>Minden találatnál két szint van. A <b style="color:#9fe0c0">👤 Köznyelven</b> rész elmondja, mi a baj és mit jelent a gyakorlatban — ehhez nem kell programozónak lenned. A <b style="color:#9cc4ff">🔧 Technikai részletek</b> és a <b style="color:#7fe0a0">✅ Javítás</b> rész egy fejlesztőnek (vagy egy AI-ügynöknek) szól, pontos fájl- és kódhivatkozásokkal.</p>
+      <p>Ha csak a lényeget akarod látni, kapcsold ki fent jobbra a <b>„Fejlesztői részletek”</b> kapcsolót — akkor csak a köznyelvi magyarázat és a tünet marad.</p>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Mit jelentenek a jelölések</h3>
+        <div class="legend">
+          <div class="lg"><span class="pill P0">P0</span><span><b>Most javítsd.</b> Valódi megbízhatósági hiba: némíthat egy agentet vagy elveszíthet egy üzenetet.</span></div>
+          <div class="lg"><span class="pill P1">P1</span><span><b>Rövid táv.</b> Fontos, de nem ég a ház — pár napon belül.</span></div>
+          <div class="lg"><span class="pill P2">P2</span><span><b>Közép táv.</b> Jövőbiztosítás, kényelem, kódminőség.</span></div>
+          <div class="lg"><span class="pill P3">P3</span><span><b>Opcionális / takarítás.</b> Apró vagy „ma még nem látszik” dolgok.</span></div>
+          <div class="lg" style="margin-top:6px"><span class="pill HIGH">HIGH</span><span>Súlyos hatás &nbsp;·&nbsp; <span class="pill MED" style="display:inline-block;padding:2px 8px">MED</span> közepes &nbsp;·&nbsp; <span class="pill LOW" style="display:inline-block;padding:2px 8px">LOW</span> alacsony &nbsp;·&nbsp; <span class="pill NIT" style="display:inline-block;padding:2px 8px">NIT</span> kozmetikai</span></div>
+          <div class="lg"><span class="pill" style="background:#11161f;border:1px solid var(--border);color:var(--muted)">S/M/L</span><span>Várható munka: <b>S</b> &lt; 1 óra · <b>M</b> &lt; fél nap · <b>L</b> ≥ 1 nap.</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Találatok kategória szerint</h3>
+        <div class="catbars" id="catbars"></div>
+        <p style="margin-top:14px;font-size:12.5px;color:var(--muted)">Összesen 43 akció-item · 88 nyers találat · 38 adverzáriálisan ellenőrizve.</p>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Hol a fő kockázat — emberi nyelven</h3>
+        <p><b>Megbízhatóság (a fő gond):</b> a négy P0 mind ugyanazt a réteget érinti — azt a háttérprogramot, ami az agentek válaszát megírja. Ha beragad, az agent örökre „dolgozik”-ban marad; ha a motor pont egy üzenet feldolgozása közben indul újra (frissítéskor magától is!), az üzenet elveszik; a gemini pedig limit-túllépéskor is „sikert” jelenthet. Mind olcsó javítás, és <b>élő agentet érint</b> (Argus most gemini-n fut).</p>
+        <p><b>Biztonság:</b> a saját gépeden, a saját agenteiddel nincs kritikus rés. Az egyetlen valós (de közepes) pont, hogy a vezérlőpult kitalálgatás-elleni védelme egy hamisítható fejlécre épül.</p>
+        <p><b>Jövő:</b> nincs adatbázis-frissítési mechanizmus és nincs automata tesztelési kapu — mindkettő ma láthatatlan, de egy jövőbeli frissítésnél visszaüthet.</p>
+      </div>
+      <div class="panel">
+        <h3>Módszertan (röviden)</h3>
+        <p>8 független AI-ágens <b>vakon</b> átolvasta a teljes kódbázist (web, frontend, runtime, adatbázis/sor, feature-ök, scriptek, tesztek, architektúra) → 88 nyers találat.</p>
+        <p>Minden komolyabb (HIGH/MEDIUM) találatot egy <b>szkeptikus ellenőrző ágens</b> visszanézett a tényleges kódban — valós-e még, vagy egy friss commit már megfogta-e —, és újrasúlyozta a te telepítésedre. 38 ilyen ellenőrzés futott, köztük tényleges reprodukciók. Végül egy vezető ágens összefűzte a tervet.</p>
+        <p>Forrás: <code>docs/ACTION-PLAN-2026-06-17.md</code> · korábbi audit: <code>docs/CODE-AUDIT-zeus-2026-06-15.md</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINDINGS -->
+  <section class="tab" id="findings">
+    <div class="controls">
+      <div class="pills" id="prioPills">
+        <button data-p="all" class="on">Mind</button>
+        <button data-p="P0">P0</button><button data-p="P1">P1</button>
+        <button data-p="P2">P2</button><button data-p="P3">P3 / low</button>
+      </div>
+      <div class="pills" id="sevPills">
+        <button data-s="all" class="on">Súly: mind</button>
+        <button data-s="HIGH">High</button><button data-s="MEDIUM">Medium</button>
+        <button data-s="LOW">Low</button><button data-s="NIT">Nit</button>
+      </div>
+      <select id="catSel"><option value="all">Kategória: mind</option></select>
+      <input type="search" id="q" placeholder="Keresés…">
+      <div class="right">
+        <button class="linkbtn" id="expandAll">Mind kinyit</button>
+      </div>
+    </div>
+    <p class="count" id="count"></p>
+    <div id="list"></div>
+  </section>
+
+  <!-- PRIOR -->
+  <section class="tab" id="prior">
+    <div class="panel"><p style="margin:0">Összevetés a két nappal korábbi (2026-06-15) audittal: mi javult azóta, és mi van még nyitva. A súlyosság-változások mutatják, hol írta felül a mostani, alaposabb ellenőrzés a korábbi besorolást.</p></div>
+    <div class="cols2">
+      <div class="col">
+        <h3><span class="dot ok"></span> Javítva / lezárva</h3>
+        <div id="fixed"></div>
+      </div>
+      <div class="col">
+        <h3><span class="dot warn"></span> Még nyitva</h3>
+        <div id="open"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAN -->
+  <section class="tab" id="plan">
+    <div class="grid2">
+      <div>
+        <div class="panel"><h3>⚡ Gyors győzelmek <span style="color:var(--muted);font-weight:500;font-size:13px">— kis munka, nagy haszon</span></h3>
+          <ul class="qw" id="qw"></ul>
+        </div>
+      </div>
+      <div>
+        <div class="panel"><h3>Javasolt sorrend</h3>
+          <ol class="steps" id="steps"></ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">Generálva multi-ágens audit-workflow-ból (8 terület-finder · 38 adverzáriális verifikáció · szintézis).</p>
+</div>
+
+<script>
+const DATA = [
+  // ================= P0 =================
+  {n:1,prio:"P0",sev:"HIGH",cat:"robustness",eff:"S",
+   title:"Beragadt háttérprogram örökre némítja az agentet (nincs időkorlát/leállító)",
+   loc:"`src/session/codex-runtime.ts:81-163` · gemini csak `--print-timeout 10m`-re hagyatkozik",
+   plain:"Amikor egy agentnek dolga van, a háttérben elindul egy program (codex vagy gemini), ami megírja a választ. Ha ez a program valamiért beragad (pl. végtelen várakozásba kerül), jelenleg semmi nem állítja le és nem jelez. Az agent örökre „dolgozik” állapotban marad: nem hibázik, de soha többé nem válaszol egyetlen üzenetre sem, amíg kézzel újra nem indítod az egész motort. Olyan, mint egy alkalmazott, aki bemegy egy szobába dolgozni, az ajtó rázáródik mögötte, és senki nem veszi észre, hogy bent ragadt.",
+   symptom:"Egy agent (most pl. Argus, ami gemini-n fut) hirtelen néma marad minden DM-re, miközben a dashboardon „running”-nak látszik. Csak a motor újraindítása oldja.",
+   tech:"A `busy` állapotot az `inFlight` halmaz tartja; a `inFlight.delete(agentId)` csak a child-process `close` eseményében fut. Ha a `codex exec` (vagy a `agy --print`) sosem zár, a `close` sosem tüzel → az agent örökre `isCodexBusy()===true` → a deliverer kihagyja (`session-manager.ts:62`). Codexnek egyáltalán nincs turn-timeout; geminié a CLI saját `--print-timeout`-jára bízva, de node-oldali kill-watchdog egyikben sincs (a `gemini-runtime.ts:36` „before we kill it” komment egy nem létező kill-re hivatkozik).",
+   fix:"Per-turn watchdog mindkét runtime-ra: `const t=setTimeout(()=>child.kill('SIGKILL'), 12-15*60_000)`; `clearTimeout(t)` MIND a `close`, MIND az `error` ágban. A timeout-kill a `fail()` úton fusson le → `inFlight` felszabadul, az item visszakerül a sorba (lehetőleg `requeueNoPenalty`-vel)."},
+  {n:2,prio:"P0",sev:"MEDIUM",cat:"robustness",eff:"S",
+   title:"Újraindításkor a „kézbesítés alatt” lévő üzenetek véglegesen elvesznek",
+   loc:"`src/queue/index.ts:55-59,44-53` · `src/index.ts:20-30`",
+   plain:"Minden hozzád vagy egy agenthez érkező üzenet egy várólistába kerül, és amíg feldolgozás alatt van, „kézbesítés alatt” címkét kap. Ha a motor pont ekkor áll le vagy indul újra (és frissítéskor magától is újraindul!), az az üzenet örökre „kézbesítés alatt” marad: a rendszer soha nem próbálja újra, és soha nem jelzi, hogy elveszett. Te csak annyit látsz, hogy írtál, és nem jött válasz.",
+   symptom:"„Írtam neki, sosem válaszolt” — jellemzően egy frissítés, leállás vagy újraindítás környékén küldött üzenetre.",
+   tech:"`markDelivering` az async turn ELŐTT `'delivering'`-re vált (és attempts+1). A `listQueued` csak `status='queued'`-et szed, így egy mid-turn crash után a sor árván `'delivering'`-ben marad: nincs retry, nincs fail, nincs felszínre kerülés. A self-update restart miatt ez nem ritka edge-case, hanem rutinszerű.",
+   fix:"Boot-on, a `startDeliverer` előtt egyetlen idempotens SQL (pontosan egy deliverer fut, így versenymentes): `UPDATE inbound_queue SET status='queued' WHERE status='delivering'` — opcionálisan `AND attempts < MAX_ATTEMPTS`, hogy a végtelen ciklust elkerüld."},
+  {n:3,prio:"P0",sev:"MEDIUM",cat:"correctness",eff:"S",
+   title:"A gemini-agent limit-túllépéskor is „sikert” jelez, és elnyeli az üzenetet",
+   loc:"`src/session/gemini-runtime.ts:147-156`",
+   plain:"Amikor a gemini-alapú agent lefut, a rendszer abból dönti el, hogy „sikerült-e”, hogy a program hibakód nélkül lépett-e ki. De a gemini akkor is hibakód nélkül lép ki, ha valójában elérted a napi használati limitet és semmit nem csinált. Ilyenkor a rendszer azt hiszi, kész a válasz, „kipipálja” az üzenetet, és soha nem próbálja újra — pedig az agent egy szót sem válaszolt.",
+   symptom:"Sok használat után (limit-közelben) az agent némán elnyeli az üzenetet: nincs hibajelzés, nincs válasz, nincs újrapróbálkozás.",
+   tech:"Codex helyesen `code===0 && sawCompleted`-et követel; a gemini bármilyen exit-0-t `markDelivered`-nek vesz. A `sawUsageLimit` jelzőt begyűjti (`:117`), de a sikerágban SOSEM ellenőrzi. (A pontos viselkedés `agy` exit-0 capnél még reverse-engineered, ezért MEDIUM, nem HIGH.)",
+   fix:"A `code===0` ágban előbb nézd a `sawUsageLimit`-et → cooldown / `requeueNoPenalty` (a `fail()` usage-ága). Plusz vezess be egy `sawOutput` boolean-t: üres stdout esetén is requeue, ne `markDelivered`."},
+  {n:4,prio:"P0",sev:"MEDIUM",cat:"correctness",eff:"S",
+   title:"Lassú válasznál ugyanaz az üzenet kétszer mehet be az agentnek",
+   loc:"`src/session/session-manager.ts:52-70` · `src/session/claude-runtime.ts:155,160`",
+   plain:"A rendszer 2 másodpercenként ránéz a várólistára, hogy van-e kézbesítendő üzenet. Ha egy üzenet feldolgozása tovább tart 2 másodpercnél, a következő ránézés ugyanazt az üzenetet még „elintézetlennek” látja, és újra elküldi az agentnek — így ugyanaz a kérdés kétszer is begépelődik az agent ablakába, és kétszer válaszolhat rá.",
+   symptom:"Az agent (jellemzően a claude-alapú, lassabb válasznál) időnként kétszer kapja meg / kétszer válaszolja meg ugyanazt az üzenetet.",
+   tech:"A `setInterval(()=>void tick(),2000)` akkor is tüzel, ha az előző async tick még fut (egy claude delivery ~0.4-5.4s). A ~250ms-os isReady await alatt az item még `'queued'`, így két átfedő tick is kiszedi `listQueued()`-ből és injektálja. codex/gemini ez ellen véd a szinkron `inFlight.add`-del, a claude út nem.",
+   fix:"Reentrancy-guard: `let running=false`, a tick elején skip ha `running`, és `try/finally`-ban állítsd/töröld. Alternatíva: self-scheduling `setTimeout` a tick befejezése UTÁN, fix interval helyett."},
+
+  // ================= P1 =================
+  {n:5,prio:"P1",sev:"MEDIUM",cat:"robustness",eff:"S",
+   title:"Túl nagy beküldött adat „lefagyasztja” a kérést (nincs 413-as elutasítás)",
+   loc:"`src/web/server.ts:49-59`",
+   plain:"A vezérlőpult fogad adatot a böngészőből. Ha valaki (akár egy hibás kliens, akár egy túl nagy beillesztés) a megengedettnél nagyobb adagot küld, a kiszolgáló nem utasítja el rendesen, hanem „beragad” annál a kérésnél — válasz nélkül lóg. A bejelentkezés véd ellene (csak te férsz hozzá), tehát nem támadási felület, inkább stabilitási hiba.",
+   symptom:"A dashboard egy-egy művelet után „beragad” / nem válaszol, ha véletlenül túl nagy adat ment át, vagy ha a kapcsolat menet közben megszakad.",
+   tech:">1 000 000 byte-nál `req.destroy()` fut, ami Node v22-n CSAK `'close'`-t tüzel (`'end'`/`'error'`-t nem — empirikusan igazolva), így a `readBody` promise sosem rendeződik, a handler sosem válaszol, a promise szivárog. Mid-stream socket-zárásra is örök függés a hiányzó `'close'` handler miatt.",
+   fix:"A méret-guardon: `res.writeHead(413); res.end()` majd `resolve(null)`. Adj `'close'` handlert, ami resolve/reject-el. A hívók a `null`-t kezeljék 413-ként. Opcionálisan előzetes `Content-Length` ellenőrzés."},
+  {n:6,prio:"P1",sev:"MEDIUM",cat:"security",eff:"M",
+   title:"A kitalálgatás-elleni védelem hamisítható fejlécre épül",
+   loc:"`src/web/server.ts:72-86`, használat :95",
+   plain:"A vezérlőpultnak van védelme a token (jelszó) kitalálgatása ellen: ha valaki sokszor próbálkozik rossz tokennel, kitiltja az IP-címét. A baj az, hogy a látogató IP-címét egy olyan fejlécből olvassa ki, amit maga a látogató is hamisíthat — így a védelem helyi hálózatról közvetlenül elérve megkerülhető. Mivel a token gyakorlatilag kitalálhatatlan (256 bites), ez közepes súlyú, nem kritikus — de a védelem jelen formájában triviálisan kikapcsolható.",
+   symptom:"Nincs látható tünet. Egy helyi hálózati támadó megkerülhetné a brute-force védelmet; a token erőssége miatt a gyakorlati kockázat alacsony.",
+   tech:"A futó process élőben `OFFICE_HOST=0.0.0.0`-n, `0.0.0.0:3430`-on hallgat (igazolva `/proc/.../environ` + `ss`). LAN-direkt kérésnél az `X-Real-IP`/`X-Forwarded-For` teljesen attacker-controlled → minden tipp friss rlMap-bucketbe esik, az eszkaláló block sosem tüzel; az rlMap a 10000-es purge felé tölthető.",
+   fix:"Az `X-Real-IP`/`XFF` fejléceket csak akkor fogadd el, ha a peer (`req.socket.remoteAddress`) trusted-proxy (explicit CIDR-allowlist a configból); egyébként `req.socket.remoteAddress`. LAN-bindnál a default legyen a socket-cím. Opcionálisan egy kis globális failed-auth backstop."},
+  {n:7,prio:"P1",sev:"MEDIUM",cat:"ops",eff:"S",
+   title:"Egy karbantartó szkript fix, rossz mappát keres ezen a gépen",
+   loc:"`scripts/codex-auth-age-check.sh:21-22`",
+   plain:"Egy karbantartó szkript fixen a „/opt/claude/theoffice” mappát keresi, csakhogy ez a telepítés a „/home/marty/theoffice”-ban van — vagyis a szkript rossz helyre néz. Ma még nincs élesítve, így nem okoz gondot, de abban a percben, hogy bekötöd (vagy codex-re váltasz egy agentet), némán, jelzés nélkül fog elhasalni.",
+   symptom:"Ma semmi. A codex-belépés-figyelő bekötésekor némán nem csinál semmit — sosem riaszt lejárt belépésnél.",
+   tech:"A hardcode-olt `/opt/claude/theoffice` nem létezik. A loop üres dirt iterál (sosem URGENT), dead auth esetén a bus-alert is kimarad a hiányzó `TOKEN_PATH` miatt.",
+   fix:"Kanonikus út-feloldás (vö. `new-agent.sh:14-15`): `INSTALL_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/..\" && pwd)\"; TENANT=\"${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}\"`. Soha ne hardcode-olj abszolút install-utat."},
+  {n:8,prio:"P1",sev:"MEDIUM",cat:"deps",eff:"S",
+   title:"Egy beépített csomag „high” biztonsági figyelmeztetést kap",
+   loc:"`@slack/web-api@7.16.0 → axios@1.17.0 → form-data@4.0.5` (GHSA-hmw2-7cc7-3qxx)",
+   plain:"A projekt egyik beépített külső csomagjában (a Slack-kommunikációt kiszolgáló láncban) a biztonsági adatbázis egy „magas” besorolású sérülékenységet jelez. A gyakorlati kihasználhatóság itt alacsony, de mivel egy egyszerű paranccsal befoltozható, érdemes letudni.",
+   symptom:"Az `npm audit` 1 db „high” figyelmeztetést mutat; a gyakorlati hatás itt minimális.",
+   tech:"CRLF injection a multipart mezőneveken, minden Slack Web API hívás láncában. A mezőnevek library-vezéreltek, ezért a tényleges kihasználhatóság alacsony, de npm-flagged high a shippelt prod depekben.",
+   fix:"`npm audit fix` (tisztán bumpol `form-data 4.0.5 → 4.0.6`, semver-patch, nincs törés). Külön kézi lépés: `@slack/web-api 7.16.0 → 7.17.0`. Commitold a lockfile-t."},
+  {n:9,prio:"P1",sev:"MEDIUM",cat:"robustness",eff:"S",
+   title:"Egy elgépelt beállítás némán kikapcsolhatja a védelmet",
+   loc:"`src/config.ts:104` (port), `:113-116` (rate-limit értékek)",
+   plain:"A rendszer beállításait környezeti változókkal lehet felülírni (pl. port, limitek). Ha valamelyikbe elgépelsz egy nem-számot, a rendszer nem szól, hanem csendben „értelmezhetetlen” értékkel fut tovább — a legrosszabb esetben épp a kitalálgatás-elleni védelem kapcsol ki teljesen, jelzés nélkül. Egy szóköz-érték pedig azonnali kitiltást okozhat.",
+   symptom:"Elgépelt beállítás után a dashboard véletlenszerű porton indul, vagy a limit-védelem csendben kikapcsol — minden figyelmeztetés nélkül.",
+   tech:"A bare `Number(\"foo\")` → NaN. NaN-port → `listen(NaN)` ephemeral porton köt; NaN rate-limit → minden összevetés false → a limiter némán fails-open. Whitespace érték → `Number(\" \")===0` → azonnali lockout. (Az üres string esete a `if(process.env.X)` guard miatt nem tüzel.)",
+   fix:"`numEnv(name, fallback)` helper: `Number.isFinite` (és `>0` ahol kell), különben warn + tartsd meg a default-ot. Portra és minden `OFFICE_RL_*`-ra."},
+  {n:10,prio:"P1",sev:"MEDIUM",cat:"robustness",eff:"S",
+   title:"Slack-fájl letöltése méret-korlát nélkül, az egész memóriába",
+   loc:"`src/channel/files.ts:38-43`",
+   plain:"Ha valaki fájlt küld egy agentnek Slacken, a rendszer a teljes fájlt egyben a memóriába tölti, méret-korlát nélkül. A Slack akár ~1 GB-os fájlokat is enged — egy nagy fájl így megeheti a memóriát, és akár az egész motort leültetheti, ami egyszerre érint minden agentet. Csak te (vagy engedélyezett küldő) tudja kiváltani, szóval inkább „véletlen láb-lövés”, mint támadás.",
+   symptom:"Nagy fájl beküldése után a motor belassul / elszáll a memória, és minden agent egyszerre akadozik.",
+   tech:"`Buffer.from(await resp.arrayBuffer())` — nincs `Content-Length` ellenőrzés és byte-cap. A teljes fájl RSS-be kerül → spike, akár OOM az engine-processben (whole-engine blast radius).",
+   fix:"`Content-Length > cap (25-50MB)` → elutasít még letöltés előtt; vagy streamelt írás futó byte-számlálóval, ami a cap felett abortál."},
+  {n:11,prio:"P1",sev:"MEDIUM→LOW",cat:"ops",eff:"M",
+   title:"A „Frissítés” gomb nem teljesen biztonságos (nincs visszaállás, kimaradhat egy eszköz)",
+   loc:"`src/web/update.ts:90-100` vs `scripts/install.sh:80,84-86`",
+   plain:"A dashboardon van egy „Frissítés” gomb, ami lehúzza a legújabb kódot és újraépíti. Három apró gond van vele: nem teljesen reprodukálható módon telepíti a függőségeket; nem frissíti az „office-say” segédeszközt (amivel az agentek üzennek), így az a régi maradhat; és ha a frissítés félresikerül, nincs automatikus visszaállás a működő állapotra.",
+   symptom:"Frissítés után néha az agentek „üzenő” funkciója a régi módon megy, vagy egy félresikerült frissítés kézi guberálást igényel.",
+   tech:"(a) `npm install` (nem `npm ci`) → nem reprodukálható, lockfile-drift; (b) az `applyUpdate` build után nem másolja újra `office-say`-t (`install -m 0755 …`); (c) nincs pre-pull HEAD-capture → build-fail pull után source/dist mismatch kézi javításig. (Owner-triggered és self-announcing, ezért a verifier LOW-ra húzta.)",
+   fix:"`npm ci --include=dev`; build után `install -m 0755 scripts/office-say.sh ~/.local/bin/office-say` (+ unit-refresh); pre-pull `git rev-parse HEAD` mentés + `git reset --hard` fallback build-failre; restart csak a success-ágban (már az). Dokumentáld az UPGRADING.md-ben."},
+
+  // ================= P2 =================
+  {n:12,prio:"P2",sev:"MEDIUM",cat:"robustness",eff:"M",
+   title:"Az adatbázis szerkezete „be van betonozva” — egy jövőbeli frissítés összeomolhat",
+   loc:"`src/db/index.ts:39`, `src/db/schema.ts`",
+   plain:"Az adatbázis a rendszer szíve (emlékek, kanban, üzenetek). A szerkezete most „be van betonozva”: a rendszer csak akkor hozza létre a táblákat, ha még nincsenek, de meglévő táblát nem tud bővíteni. Ez ma nem gond. De amint egy jövőbeli frissítés új mezőt akarna hozzátenni, a „Frissítés” gomb után a motor folyamatosan újraindulva összeomolhat a meglévő adataidon — pont azon a telepítésen, amit a legkevésbé szeretnél elveszíteni.",
+   symptom:"Ma semmi. Egy jövőbeli, sémát igénylő frissítés után a motor „no such column” hibával indul-összeomlik körbe-körbe.",
+   tech:"Csak `CREATE TABLE IF NOT EXISTS`, nincs `PRAGMA user_version`/ALTER/runner. Az ⟳ Update first-class feature, így az első oszlop-hozzáadás crash-loopot okoz a meglévő tenant DB-n. Latens.",
+   fix:"`PRAGMA user_version`-gated runner: rendezett `(version, sql)` lista egy tranzakcióban `openDb`-n, a végén user_version bump. A CREATE-IF-NOT-EXISTS marad fresh installra. Plusz pre-update DB-backup (`theoffice.db` másolat) az `applyUpdate`-ben."},
+  {n:13,prio:"P2",sev:"MEDIUM",cat:"correctness",eff:"S",
+   title:"Az agent „elfelejtheti”, min dolgozik (kieshetnek a friss emlékek)",
+   loc:"`src/memory/recall.ts:30-32`",
+   plain:"Az agentek minden megszólaláskor kapnak egy „emlékeztető” csomagot a memóriájukból: amin épp dolgoznak (a „forró” emlékek) és a fontos háttér. A jelenlegi lekérdezés viszont az összes emléket vegyesen, időrendben szedi, és ha sok új, kevésbé fontos emlék gyűlt össze, az aktuális munka emlékei kieshetnek a csomagból — az agent gyakorlatilag „elfelejti”, min dolgozik.",
+   symptom:"Az agent időnként úgy viselkedik, mintha nem emlékezne a folyamatban lévő feladatára, főleg ha sok új emlék gyűlt össze.",
+   tech:"`searchMemories({limit:200})` MINDEN kategórián recency szerint, utána JS-ben szűr hot/warm-ra. Ha >200 cold/shared sor szigorúan újabb a hot/warm-nál, 0 hot/warm jut a filterig. Empirikusan: 1 hot + 250 újabb cold → 0 hot a preamble-ben.",
+   fix:"Told a kategória-szűrést SQL-be: per-tier fetch `category IN (...)` (a `SearchArgs.category` és az `idx_memories_agent_cat` már létezik). A byte-budget trimming marad."},
+  {n:14,prio:"P2",sev:"MEDIUM",cat:"correctness",eff:"S",
+   title:"A témához illő régi tudás nem mindig jut el az agenthez",
+   loc:"`src/memory/recall.ts:33-35`",
+   plain:"Hasonló a fentihez: amikor írsz valamit, a rendszer megpróbálja a témához passzoló korábbi emlékeket előhúzni. De a szűrés úgy van megírva, hogy a frissebb, de nem oda illő emlékek „kitölthetik a helyet”, és a valóban releváns régi emlék nem jut el az agenthez.",
+   symptom:"Az agent nem hozza elő a témához tartozó korábbi tudást, pedig az megvan a memóriájában.",
+   tech:"`limit:18` MINDEN kategórián FTS-sel, utána JS-filter cold/shared-re. Ha újabb hot/warm is matchel, telíti a 18-as ablakot → 0 cold/shared. (Az on-demand memory-search fallback enyhít.)",
+   fix:"Ugyanaz a kategória-lista mint #13: `category IN ('cold','shared')` a topical fetch-ben."},
+  {n:15,prio:"P2",sev:"MEDIUM→LOW",cat:"correctness",eff:"S",
+   title:"Ritkán ugyanaz a válasz kétszer megy ki Slackre",
+   loc:"`src/channel/slack-send.ts:37-57`, `src/queue/index.ts:89-118`",
+   plain:"Amikor egy agent választ küld Slackre, ritka esetben (épp amikor a Slack lassan válaszol, jellemzően terhelés alatt) ugyanaz az üzenet kétszer is kimehet. Csak kozmetikai bosszúság, de látható.",
+   symptom:"Néha egy agent ugyanazt az üzenetet kétszer posztolja Slacken (terhelés/rate-limit alatt).",
+   tech:"A sor `'queued'` marad az await `postMessage` után; az 1500ms tick nem várja meg az előzőt → >1.5s latencián a következő tick újraposztol. Plusz a `markOutboundFailed` minden hibát 5×-ig retry-zol (a permanens errort is).",
+   fix:"`let running=false` guard `try/finally`-ban, vagy intermedier `'sending'` státusz (kiszűrve `listOutboundQueued`-ból), tükrözve a `markDelivering`-et. Permanens Slack-errort (`channel_not_found`, `invalid_auth`…) azonnal `'failed'`."},
+  {n:16,prio:"P2",sev:"MEDIUM",cat:"robustness",eff:"M",
+   title:"Időzített feladatok kimaradhatnak, ha a gép épp aludt/újraindult",
+   loc:"`src/scheduler/index.ts:79-116`",
+   plain:"Az időzített feladatok (pl. reggeli összefoglaló 8:00-kor) csak akkor futnak le, ha a motor pontosan abban a percben fut. Ha a gép aludt, újraindult vagy épp frissült akkor, a feladat egyszerűen kimarad — és nem is jelzi, hogy elmaradt.",
+   symptom:"Egy időzített feladat (pl. reggeli brief) néha csendben kimarad, ha a gép aludt/újraindult az időpontban.",
+   tech:"A scheduler csak az aktuális percet nézi, nincs backfill/catch-up. Egy alvás/restart az ütemezett percen átível, az alkalom elveszik, és nincs róla jelzés.",
+   fix:"Boot-on és tickenként szkenneld az utolsó tick óta esedékes alkalmakat (persist last-run ts vagy `task_runs`), és tüzeld le egyszer (a meglévő dedup véd a duplától). Vagy dokumentáld explicit a no-catch-up viselkedést."},
+  {n:17,prio:"P2",sev:"MEDIUM→LOW",cat:"architecture",eff:"M",
+   title:"A vezérlőpult túl sokat tud a motorok belső működéséről (rendezetlenség)",
+   loc:"`src/web/server.ts:218-230,458-461` · `codex-runtime.ts:67` + `gemini-runtime.ts:71`",
+   plain:"Ez nem felhasználói hiba, hanem belső rendezetlenség: a vezérlőpult kódja közvetlenül ismeri az egyes motor-típusok (claude/codex/gemini) belső részleteit, ahelyett hogy egy közös felületen át kezelné őket. Emiatt minden új motor-típus hozzáadásakor több helyen kell nyúlni a kódhoz, és könnyű elfelejteni egyet.",
+   symptom:"Nincs felhasználói tünet. Egy új runtime hozzáadásakor a dashboard státusz-oszlopa vagy limit-számítása némán hibás lehet, amíg valaki nem javítja.",
+   tech:"A server.ts direktben importálja az `isCodexBusy/isGeminiBusy`-t és `a.runtime==='codex'/'gemini'`-re branchel; a `MAX_CODEX_AGENTS` is a web-rétegben van. Az interfész `isBusy(agentId)`-ja már létezik és be van kötve — a direkt import felesleges. A két holder `agent-${id}`-t épít `sessionNameFor()` helyett.",
+   fix:"Vezesd be a `Runtime.liveState(agentId)`-t az interfészbe (claude pane-ből, holder inFlight-ból) → server.ts `runtimeFor(a).liveState(a.id)`. A ceiling legyen runtime-deklarált `maxConcurrent?`. codex/gemini hívja a közös `sessionNameFor`-t."},
+  {n:18,prio:"P2",sev:"MEDIUM",cat:"dx",eff:"M",
+   title:"Nincs automata minőség-kapu (CI) — elrontott commit eljuthat a telepítőhöz",
+   loc:"repo root (nincs `.github/workflows`, eslint, prettier)",
+   plain:"Nincs automatikus „minőség-kapu”: semmi nem ellenőrzi automatikusan minden változtatásnál, hogy a kód lefordul-e, átmennek-e a tesztek, és a szkriptek hibátlanok-e. Mivel a hivatalos telepítés egyenesen a fő ágról tölt le és futtat, egy elrontott commit eljuthat a következő telepítőhöz. Ez a legjobb megtérülésű „higiéniai” fejlesztés.",
+   symptom:"Egy elrontott commit észrevétlenül bekerülhet; a friss telepítés vagy a „Frissítés” gomb hozhatja felszínre.",
+   tech:"A `typecheck`/`test` scriptek megvannak, de semmi nem kényszeríti őket. A dokumentált install `curl … | bash` a `main`-ről.",
+   fix:"Minimális GitHub Actions (vagy pre-push hook) push/PR-en: `npm ci && npm run typecheck && npm test && npx shellcheck bootstrap.sh scripts/*.sh`. Stock eslint+prettier + `.editorconfig`."},
+
+  // ================= P3 / LOW / NIT =================
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"A felület szöveg-megjelenítése nem „golyóálló” minden karakterre",
+   loc:"`web-ui/app.js:7`",
+   plain:"A vezérlőpult szövegmegjelenítője nem kezel le minden különleges karaktert. A gyakorlatban most nincs élő rés (minden megjelenített szöveg vagy a saját, megbízható adatod, vagy ártalmatlan helyen áll), de érdemes egyetlen sorral bebiztosítani a jövőre.",
+   symptom:"Ma nincs tünet; elméleti megjelenítési/biztonsági kockázat, amit egy egysoros javítás végleg lezár.",
+   tech:"Az `esc()` nem escape-eli a `'`-t és a backtick-et. Minden single-quoted slot owner-kontrollált dir-nevet (`a.id`) vagy szerver-generált hexet kap, az LLM free-text text-node-ban marad → a „raw style interpoláció” mint élő rés refuted. Latens hardening, nem stored-XSS.",
+   fix:"Kvótabiztos `esc()` (`'`→`&#39;`, backtick is) + `agent.color` hex-validáció (`/^#[0-9a-fA-F]{3,8}$/`). Opcionálisan CSP `script-src 'self'`."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"Nem ellenőrzött agent-azonosító íráskor → „árva” bejegyzés",
+   loc:"`src/web/server.ts:306-394`",
+   plain:"Amikor a dashboardról hozol létre kanban-kártyát vagy üzenetet, a rendszer nem ellenőrzi, hogy a megadott agent-azonosító létezik-e. Elgépelésnél így „árva” bejegyzés keletkezhet, amit soha senki nem kap meg.",
+   symptom:"Elgépelt agent-névvel létrehozott kártya/üzenet csendben sehová sem kerül.",
+   tech:"A `POST /api/{kanban,memories,daily-log}` agentId/from/to mezői nincsenek a `loadAgents` ellen validálva → adatintegritás-footgun (orphan kanban-sor, sosem kézbesülő bus-üzenet).",
+   fix:"Validáld legalább a routing-endpointokat (from/to/agent) a betöltött agent-lista ellen; ismeretlennél 400."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"Slack-fájl: nincs cím-ellenőrzés a token-csatolt letöltésen",
+   loc:"`src/channel/files.ts:35-38`",
+   plain:"A fájl-letöltésnél a rendszer a hozzáférési kulcsot rácsatolja a Slacktől kapott címre, anélkül hogy ellenőrizné, tényleg a Slack címe-e. Védelmi tartalék (mélységi védelem), ma nem kihasználható.",
+   symptom:"Nincs látható tünet; megerősítő óvintézkedés.",
+   tech:"Az xoxb token verbatim a Slack-adta URL-re kerül host-allowlist nélkül.",
+   fix:"`new URL(url).hostname.endsWith('.slack.com')` assert letöltés előtt."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"A „csak privát üzenet” szabály nincs kőbe vésve a kódban",
+   loc:"`src/channel/slack-ingest.ts:58-70`",
+   plain:"Az agentek ma csak privát üzenetet (DM) fogadnak, ami helyes és biztonságos. De a kódban nincs kikényszerítve ez a szabály — ha valaha bővítenéd a Slack-jogokat, az agentek véletlenül nyilvános csatorna-üzenetekre is reagálhatnának.",
+   symptom:"Ma biztonságos; egy jövőbeli Slack-jogosultság-bővítés mellékhatása lehet.",
+   tech:"A manifest ma `message.im`-only (ezért safe), de a parser nem reject-eli a `channel_type !== 'im'`-et.",
+   fix:"Explicit reject `channel_type !== 'im'`, ha a DM-only a szándék."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"A titkos fájlok mappája a kelleténél megengedőbb jogú",
+   loc:"`scripts/install.sh`",
+   plain:"A titkos fájlokat tároló mappa jogosultsága megengedőbb a szükségesnél (bár maguk a fájlok szigorúan védettek, 0600). Egy gépen, ahol más felhasználó is van, ez elvi kockázat.",
+   symptom:"Nincs tünet egyfelhasználós gépen; szigorítás jó gyakorlat.",
+   tech:"A `tenant/store` dir 0775; a fájlok 0600-asok, de a dir traversálható.",
+   fix:"`chmod 700 tenant/store` az install.sh-ban."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"M",
+   title:"A „korlátozott” agent-profil tiltásai nem érvényesülnek codex/gemini-n",
+   loc:"`codex-runtime.ts`, `gemini-runtime.ts` (a korábbi audit saját korrekciója)",
+   plain:"A háttérben futó agenteknek „kérdés nélkül” kell tudniuk dolgozniuk, ezért egy olyan kapcsolóval indulnak, ami kikapcsolja a megerősítés-kérést. Ez headless működéshez kell és helyes. Viszont a codex/gemini motoroknál a „korlátozott” agent-profil tiltásai nem érvényesülnek (a Claude-nál igen). Mivel minden agented „teljes” jogú és a sajátod, ez ma nem kockázat.",
+   symptom:"Nincs tünet; csak akkor számít, ha valaha korlátozott/megosztott (másnak is elérhető) agentet veszel fel codex/gemini motorral.",
+   tech:"A `.claude/settings.json` deny-listát csak a Claude Code olvassa; codex/gemini a `--dangerously-*` flaggel a sandboxot is kikapcsolja. A flag headless-hez KELL — NE vedd ki.",
+   fix:"Opcionális guardrail: warn/refuse, ha non-`full` profilt codex/gemini agentre állítanak. Dokumentált limitáció, nem kódhiba."},
+  {n:null,prio:"P3",sev:"LOW",cat:"security",eff:"S",
+   title:"A telepítés internetes szkript azonnali futtatásával, verzió-rögzítés nélkül",
+   loc:"`bootstrap.sh`, README install-sor",
+   plain:"A telepítés egy internetről letöltött szkript azonnali futtatásával történik, konkrét verzióhoz rögzítés nélkül. A saját gépeden, a saját kódoddal ez bevett, de jó gyakorlat verzióhoz kötni és felkínálni az „előbb nézd meg, aztán futtasd” utat.",
+   symptom:"Nincs tünet; telepítési jó gyakorlat.",
+   tech:"`curl|bash` / `curl|sudo bash` pinning nélkül a `main`-ről.",
+   fix:"Pin-elj taget (`git clone --branch vX.Y.Z`), és kínálj „letöltöm, megnézem, futtatom” alternatívát."},
+
+  {n:null,prio:"P3",sev:"LOW",cat:"robustness",eff:"S",
+   title:"Hibás agent-konfig esetén az agent indulásnál „dolgozik”-ban ragadhat",
+   loc:"`src/session/codex-runtime.ts:82-107`",
+   plain:"Ritka esetben (pl. ha egy agent saját .env fájlja hibás) a háttérprogram elindítása már a kezdetkor elhasal úgy, hogy az agent „dolgozik” állapotban ragad. Szűk eset, de rokon a P0 #1-gyel.",
+   symptom:"Hibás agent-konfiguráció után az agent némán „busy” marad.",
+   tech:"Az `inFlight.add` a spawn ELŐTT fut; egy szinkron spawn-throw (pl. `.env` ami directory/mode-000) örökre busy-ban hagyja. Szűk trigger, ezért LOW.",
+   fix:"`inFlight.add` / `markDelivering` csak a SIKERES spawn UTÁN; a spawn köré try/catch, ami `fail()`-t hív."},
+  {n:null,prio:"P3",sev:"LOW",cat:"robustness",eff:"S",
+   title:"Bizonyos hiba kétszer könyvelődik el (belső)",
+   loc:"`src/session/codex-runtime.ts:129-162`",
+   plain:"Technikai apróság: egy bizonyos hiba-esetben a rendszer kétszer könyveli el ugyanazt a kudarcot. Nincs felhasználói hatás.",
+   symptom:"Nincs látható tünet; belső dupla-hiba-könyvelés.",
+   tech:"Egy `error` eseményt általában `close` követ → a `fail()` kétszer futhat ugyanarra a turn-re.",
+   fix:"`let settled=false` latch a terminal ágak köré."},
+  {n:null,prio:"P3",sev:"LOW",cat:"robustness",eff:"S",
+   title:"Egy agent .env-je felülírhatja a rendszer-útvonalakat",
+   loc:"a három runtime env-építése",
+   plain:"Egy agent saját beállítófájlja (.env) felülírhatja a rendszer alap-útvonalait (PATH/HOME), amitől elromolhat, hogy az agent megtalálja-e a segédeszközeit. Magadnak okozhatod, ha rosszul töltöd ki.",
+   symptom:"Rosszul megírt agent-.env után az agent nem találja az „office-say”-t / a bináris eszközeit.",
+   tech:"A `.env` feltétel nélkül felülírja a `PATH`/`HOME`/`TZ`/`OFFICE_*`-ot a child env-ben.",
+   fix:"Alkalmazd a `.env`-et előbb, a reserved kulcsokat (PATH/HOME/TZ/OFFICE_*) utána; a PATH-t append/prepend, ne felülírd."},
+  {n:null,prio:"P3",sev:"LOW",cat:"robustness",eff:"S",
+   title:"Egy üzenet idő előtt „feladott” lehet, pedig csak várni kellett volna",
+   loc:"`src/session/claude-runtime.ts:160,189`",
+   plain:"Amikor az agent ablaka épp nem áll készen, a rendszer elhalaszt egy üzenetet, de közben „elhasznál” egy próbálkozást a néhányból — így idő előtt feladhatja egy amúgy kézbesíthető üzenet kiküldését.",
+   symptom:"Néha egy üzenet idő előtt „feladott” állapotba kerül, pedig csak várni kellett volna.",
+   tech:"A `submit-give-up` requeue a `requeue`-t (attempts+) használja a tranziens (nem-ready pane) úton is.",
+   fix:"Használj `requeueNoPenalty`-t a tranziens útra; a budget csak valódi kudarcra fogyjon."},
+  {n:null,prio:"P3",sev:"LOW",cat:"robustness",eff:"S",
+   title:"Leállítás nem várja meg a folyamatban lévő munkát",
+   loc:"`src/index.ts:48-56`",
+   plain:"Leállításkor a motor nem várja meg a folyamatban lévő munkát, és nem zárja le rendesen a háttérprogramokat. Ez súlyosbítja a P0 #2 üzenetvesztését.",
+   symptom:"Leállítás/újraindítás környékén nagyobb eséllyel veszik el egy folyamatban lévő üzenet.",
+   tech:"A shutdown fire-and-forget: nem drain-eli a futó ticket, nem öli a child-processeket.",
+   fix:"Bounded drain + runtime `shutdown()` a stop-láncban; a #2 reaper ezt tovább védi."},
+
+  {n:null,prio:"P3",sev:"LOW",cat:"architecture",eff:"S",
+   title:"Token-csere után kézi újraindítás kell a Slack-azonosítóhoz",
+   loc:"`src/channel/slack-ingest.ts:108`, `slack-send.ts:21`",
+   plain:"Az agentek Slack-azonosítóit a motor indításkor olvassa be egyszer. Ha utólag új tokent adsz egy meglévő agentnek, kézi újraindítás kell, hogy életbe lépjen (új agent felvételénél ez magától megtörténik).",
+   symptom:"Token-csere után az agent Slacken nem frissül, amíg újra nem indítod a motort.",
+   tech:"A roster boot-snapshot; a sanctioned `new-agent.sh:46-48` már restartol, csak a ritka re-tokening igényel kézi restartot.",
+   fix:"Reload-signal vagy roster-újraolvasás re-tokeningnél (alacsony prioritás)."},
+  {n:null,prio:"P3",sev:"LOW",cat:"architecture",eff:"S",
+   title:"A dokumentált „product” réteg a lemezen nem létezik",
+   loc:"`src/config.ts:98`",
+   plain:"A dokumentáció egy háromrétegű felépítést ír le (platform / product / tenant), de a középső „product” réteg a lemezen valójában nincs jelen — fogalmi elcsúszás, ami félrevezetheti az olvasót.",
+   symptom:"Nincs működési tünet; dokumentáció és kód közti eltérés.",
+   tech:"A `deepMerge(platform, product, tenant)` product-rétege bekötött, de nincs `product/config.example.json` a fán.",
+   fix:"Vagy commitold a `product/config.example.json`-t, vagy egyszerűsítsd a README-t két rétegre (platform/tenant)."},
+  {n:null,prio:"P3",sev:"NIT",cat:"quality",eff:"S",
+   title:"Holt kód és félrevezető kommentek (takarítás)",
+   loc:"`types.ts:107-110`, `tmux.ts:87`, `config.ts:110-112`, `runtime.ts:11-18`",
+   plain:"Néhány holt kód és félrevezető komment maradt a kódban (pl. „két runtime”, miközben már három van). Nem hibásak, csak takarítást kérnek.",
+   symptom:"Nincs tünet; a karbantarthatóságot rontja.",
+   tech:"Olvasatlan mezők (`appTokenRef`/`botTokenRef`), hívatlan `ensureServer`, unreachable rateLimit fallback, stale „two runtimes” komment.",
+   fix:"Töröld a dead surface-t, frissítsd a „two runtimes” → „three runtimes” kommentet; egymenetes sweep."},
+  {n:null,prio:"P3",sev:"NIT",cat:"quality",eff:"S",
+   title:"Apró kódminőségi következetlenségek",
+   loc:"`server.ts` MIME-map · `db/index.ts` openDb · codex/gemini holderek",
+   plain:"Néhány apró következetlenség (hiányos fájltípus-tábla, ismételt kód). Nincs működési hatás.",
+   symptom:"Nincs tünet.",
+   tech:"MIME-map hiányos (ico/jpg/woff → octet-stream); `openDb` ignorálja a 2. path-t; `agent-${id}` duplikáció a holderekben.",
+   fix:"Egészítsd ki a MIME-mapet; codex/gemini hívja a közös `sessionNameFor()`-t."},
+
+  {n:null,prio:"P3",sev:"MEDIUM",cat:"testing",eff:"M",
+   title:"A frissen hozzáadott codex/gemini logika nincs teszttel fedve",
+   loc:"`src/session/codex-runtime.ts`, `gemini-runtime.ts`",
+   plain:"Épp a frissen hozzáadott codex/gemini motor-logika (annak eldöntése, hogy „sikerült-e a válasz”) nincs automata teszttel lefedve — pont az a kód, ami a P0 hibák forrása. Teszt nélkül a javítás könnyen visszacsúszhat egy későbbi módosításnál.",
+   symptom:"Nincs közvetlen tünet; a P0 javítások regresszió-veszélye nő teszt nélkül.",
+   tech:"0 teszt a success/failure detection-re; az `USAGE_LIMIT_RE` 5/5 benign stringre is matchel (over-match).",
+   fix:"Faktoráld `decideCodexOutcome`/`decideGeminiOutcome` pure fn-be + tábla-teszt (exit0+completed→delivered, exit0+usage→requeueNoPenalty, error+close→pontosan egy terminal, sync-throw→inFlight-release)."},
+  {n:null,prio:"P3",sev:"MEDIUM",cat:"testing",eff:"M",
+   title:"Az üzenetsor logikája nincs közvetlenül tesztelve",
+   loc:"`src/queue/index.ts`",
+   plain:"Az üzenetsor logikája (próbálkozás-számlálás, állapotgép) nincs közvetlenül tesztelve — ez a rendszer szíve, ahol egy elrontott módosítás üzenetet veszíthet.",
+   symptom:"Nincs közvetlen tünet; rejtett regresszió-kockázat a kézbesítésben.",
+   tech:"Fedetlen: `markDelivering` attempts+1, `requeue` attempts-érintetlen, `requeueNoPenalty` MAX(0,…) clamp, a teljes outbound state-machine. (A null/undefined dedup már fedett `bus.test.ts`-ben.)",
+   fix:"`queue/index.test.ts` az attempt-math + outbound state-machine-re."},
+  {n:null,prio:"P3",sev:"LOW",cat:"testing",eff:"S",
+   title:"Egy teszt időnként „ok nélkül” elbukik (flaky)",
+   loc:"`src/web/server.test.ts:80-81`",
+   plain:"Egy létező teszt valódi hálózati portokat használ, ezért időnként „ok nélkül” elbukhat (flaky), és egy kommentje félrevezető — gyengébbet állít, mint amit ellenőriz.",
+   symptom:"A teszt-futtatás időnként véletlenszerűen piros lesz.",
+   tech:"Valódi `fetch` inkrementáló portokon; a 80-81 komment félrevezet.",
+   fix:"Injektálj portot / in-proc hívás; javítsd a kommentet."},
+
+  {n:null,prio:"P3",sev:"LOW",cat:"ops",eff:"S",
+   title:"Nincs egyszerű „életjel” (nem látszik, ha a kézbesítő megállt)",
+   loc:"web-réteg (`/api/host` a hostot méri, nem az engine-t)",
+   plain:"Nincs egyszerű „életjel” nézet, ami megmutatná, fut-e a kézbesítő, mekkora a várólista, mikor futott utoljára időzítő. Emiatt egy elakadás nehezen vehető észre.",
+   symptom:"Nehéz észrevenni, ha a kézbesítő megállt vagy a sor torlódik.",
+   tech:"Az `/api/host` a hostot jelenti, nem az engine liveness-ét.",
+   fix:"Olcsó `/api/health`: deliverer last-tick, queued/delivering count + oldest-age, scheduler last-fire, Slack socket connected?"},
+  {n:null,prio:"P3",sev:"LOW",cat:"ops",eff:"S",
+   title:"„Sikerült és elindult” üzenet akkor is, ha az indítás elhasalt",
+   loc:"`scripts/onboard.sh:111`, `scripts/new-agent.sh:50`",
+   plain:"Új agent létrehozásakor a rendszer akkor is „sikerült és elindult” üzenetet ír, ha az indítás valójában elhasalt — félrevezető visszajelzés.",
+   symptom:"„Agent created and launched” üzenet jön akkor is, ha az agent valójában nem indult el.",
+   tech:"A `launch-agent.mjs` exit-kódja `>/dev/null 2>&1 || true`-val elnyelve.",
+   fix:"Ne nyeld le a launch exit-kódját; jelezd a tényleges állapotot."},
+  {n:null,prio:"P3",sev:"LOW",cat:"ops",eff:"S",
+   title:"Telepítő rossz felhasználót állíthat be automatizált környezetben",
+   loc:"`scripts/onboard.sh:108`",
+   plain:"Egy telepítő szkript a felhasználónevet egy olyan változóból veszi, ami bizonyos (automatizált) környezetben üres lehet, így rossz beállítást csinálhat.",
+   symptom:"Automatizált/headless telepítésnél az „automatikus indulás” beállítása rossz felhasználóra mehet.",
+   tech:"`$USER`-t használ `id -un` helyett a linger-enable-höz.",
+   fix:"`id -un` a robusztus user-feloldáshoz."},
+  {n:null,prio:"P3",sev:"LOW",cat:"deps",eff:"S",
+   title:"Több külső csomag jelentősen elavult",
+   loc:"`better-sqlite3 11→12`, `vitest 2→4`, `cron-parser 4→5`, `typescript 5→6`",
+   plain:"Több külső csomag jelentősen elavult (nincs rajtuk biztonsági riasztás, csak elmaradás). Frissíteni érdemes, tesztekkel fedezve.",
+   symptom:"Nincs tünet; karbantartási elmaradás.",
+   tech:"Major-elmaradások; a `better-sqlite3`-at tartsd prebuild-elérhető verzión a Node-tartományra, különben a `curl|bash` install forrásból fordít.",
+   fix:"Tervezett bump (cron-parser/vitest előbb a teszt mögött), CI-vel fedezve."},
+  {n:null,prio:"P3",sev:"LOW",cat:"ops",eff:"S",
+   title:"A README/telepítő bizonytalan repó-címre mutat",
+   loc:"`README.md`, `bootstrap.sh`",
+   plain:"A README és a telepítő egy „szoszo/theoffice” címre mutat, miközben a git-felhasználó „JMarty”. Tisztázni kell, melyik a hivatalos forrás, mielőtt valaki a rossz helyről telepít.",
+   symptom:"Valaki a rossz/elavult forrásból telepíthet.",
+   tech:"A bootstrap install-URL és a README repó-útja `szoszo/theoffice`; a commit-author `JMarty`.",
+   fix:"Erősítsd meg / javítsd a kanonikus repó-utat, mielőtt publikálod az install-sort."},
+  {n:null,prio:"P3",sev:"LOW",cat:"correctness",eff:"S",
+   title:"A napi-napló dátuma fix budapesti időzónát használ",
+   loc:"`src/web/server.ts:309`",
+   plain:"A napi-napló dátumszámítása fixen budapesti időzónát használ a beállított időzóna helyett. Ma egyezik a tiéddel, ezért nem látszik, de elvi hiba.",
+   symptom:"Ma egyezik; eltérő időzóna-beállításnál a napi-napló rossz naphoz írna.",
+   tech:"`Europe/Budapest` literál `cfg.owner.timezone` helyett (a CLAUDE.md szerint configból kéne).",
+   fix:"`cfg.owner.timezone` használata a literál helyett."}
+];
+
+const FIXED = [
+  {t:"Kitiltás-bug (a védelem egy órára kizárhatott, akár érvényes tokennel is)",tag:["JAVÍTVA","g"],
+   d:"Commitok `d7ca26b` (eszkaláló backoff) + `646234b` („never block a valid token; only throttle failed auth”). Az ellenőrzés megerősíti: érvényes token mindig átmegy, az eszkaláció+takarítás korrekt és tesztelt. A korábbi audit fő fájdalompontja (saját magad kizárása) megszűnt."},
+  {t:"Bejelentkező-villanás a dashboardon",tag:["JAVÍTVA","g"],
+   d:"`69bc87f` (a token-kapu alapból rejtett), `8eaeff9` (auth-próba a lekérdezések előtt), `a2f1929` (no-store a statikus fájlokon)."},
+  {t:"Felület-szöveg XSS (korábban HIGH-nak jelölve)",tag:["HIGH→LOW","b"],
+   d:"A kód jelen van, de az ellenőrzés kimerítően igazolta: nincs élő kihasználható út — minden megjelenített érték a saját, megbízható adatod vagy ártalmatlan helyen áll. Latens hardening, nem valódi rés."},
+  {t:"„Korlátozott profil megkerülhető” (korábban CRITICAL-nak jelölve)",tag:["LOW/info","b"],
+   d:"Már a korábbi audit saját korrekciója is LOW-ra tette ezen a telepítésen; az ellenőrzés megerősíti. Nem regresszió, a szükséges flageket meg kell tartani."},
+  {t:"Keresési „üres találat” állítólagos hiba",tag:["CÁFOLVA","g"],
+   d:"Az ellenőrzés a tényleges adatbázis ellen igazolta: az üres keresés 0 sort ad hiba nélkül. Pozitívum — ezt nem szabad „javítani”, mert az okozna hibát."},
+  {t:"Konfig-összefésülés elvi sebezhetősége",tag:["BIZTONSÁGOS","g"],
+   d:"A gyakorlatban biztonságos; nem nyitott kockázat."}
+];
+
+const OPEN = [
+  {t:"Kitalálgatás-védelem hamisítható fejlécre épül (korábbi #1)",tag:["MEDIUM","a"],d:"NYITVA → P1 #6. A motor élőben tényleg az egész hálózaton (0.0.0.0) hallgat, tehát a feltevés nem elméleti."},
+  {t:"Beragadt háttérprogram / nincs időkorlát (korábbi #3)",tag:["HIGH","r"],d:"NYITVA → P0 #1 (időkorlát) + P3 (indulási beragadás, szűk eset)."},
+  {t:"Gemini „sikert” jelez limitnél (korábbi #4)",tag:["MEDIUM","a"],d:"NYITVA → P0 #3."},
+  {t:"„Kézbesítés alatt” üzenetek elvesznek restartkor (korábbi #5)",tag:["MEDIUM","a"],d:"NYITVA → P0 #2. A korábbi audit a fix-prioritás #1-jeként sürgette; még nincs patchelve."},
+  {t:"„Frissítés” gomb = teljes hozzáférés (korábbi #6)",tag:["LOW","b"],d:"NYITVA, de saját gépen elfogadható. A nyers kimenet-szivárgás + párhuzamos-futás-zár hiánya LOW → P2 (in-flight 409-guard, összegzett kimenet)."},
+  {t:"Nincs adatbázis-frissítés (korábbi #7)",tag:["MEDIUM","a"],d:"NYITVA → P2 #12."},
+  {t:"Elgépelt beállítás némán kikapcsol védelmet (korábbi #8)",tag:["MEDIUM","a"],d:"NYITVA → P1 #9."},
+  {t:"Dupla Slack-poszt (korábbi #9)",tag:["MEDIUM→LOW","b"],d:"NYITVA, mikroszekundumos ablak → P2 #15."},
+  {t:"Slack-fájl cím/méret (korábbi #10)",tag:["MEDIUM","a"],d:"NYITVA: méret-cap MEDIUM (P1 #10), cím-ellenőrzés LOW (P3)."},
+  {t:"Túl nagy adat lefagyasztja a kérést (korábbi #11)",tag:["MEDIUM","a"],d:"NYITVA, bejelentkezés-mögötti (nem nyilvános DoS) → P1 #5."},
+  {t:"Emlékek kieshetnek az agent csomagjából (korábbi LOW)",tag:["LOW→MEDIUM","a"],d:"NYITVA és FELFELÉ: forró/meleg kiesés (P2 #13) + témához-illő kiesés (P2 #14) komolyabb, mint a korábbi LOW sejtette."},
+  {t:".env felülírhatja a rendszer-útvonalakat (korábbi HIGH)",tag:["HIGH→LOW","b"],d:"NYITVA, de magadnak okozható (te írod a .env-et) → P3."},
+  {t:"Napi-napló fix időzóna (korábbi LOW)",tag:["LOW","a"],d:"NYITVA → P3 / gyors győzelem (`server.ts:309`)."},
+  {t:"Takarítás (holt kód, dup helper, „két runtime” komment)",tag:["NIT","a"],d:"NYITVA → P3 egymenetes takarítás."}
+];
+
+const QUICKWINS = [
+  "<b>P0 #2</b> — egyetlen idempotens SQL boot-on: megszünteti a néma üzenetvesztést restartkor.",
+  "<b>P0 #1</b> — per-turn időkorlát + leállító mindkét motorhoz: élő agentet ment a néma némulástól.",
+  "<b>P0 #3/#4</b> — gemini limit-ellenőrzés + claude reentrancy-guard: kis diff, valódi correctness.",
+  "<b>P1 #8</b> — <code>npm audit fix</code>: egysoros, lezárja a „high” figyelmeztetést.",
+  "<b>P1 #7</b> — codex-auth-szkript út-feloldása: másold a kanonikus 2 sort.",
+  "<b>P1 #9</b> — <code>numEnv</code> guard: visszaadja a védelmet az elgépelés ellen.",
+  "<b>P1 #10</b> — Slack-fájl méret-cap: egy <code>if</code>, memória-védelem.",
+  "<b>Napi-napló időzóna</b> (<code>server.ts:309</code>) → <code>cfg.owner.timezone</code>: latens hiba lezárása.",
+  "<b><code>esc()</code> golyóállóvá tétele</b> + szín-validáció: az egész elméleti XSS-osztályt lezárja.",
+  "<b>Frontend <code>post()</code> r.ok-ellenőrzés</b>: a sikertelen start/stop/restart ne látsszon sikeresnek.",
+  "<b>Takarítás:</b> holt mezők, hívatlan függvény, dup fallback, „két runtime” komment, közös <code>sessionNameFor</code>."
+];
+
+const STEPS = [
+  "<b>Megbízhatósági mag egy menetben (P0 #1–4, mind kis munka):</b> motor-időkorlát + leállító; boot-reaper a „kézbesítés alatt” sorokra; gemini limit-ellenőrzés; claude reentrancy-guard. Ez zárja le a „megkapta, de nem reagált” hibaosztályt — a kódbázis legvalósabb kockázatát —, és élő agentet (Argus) érint.",
+  "<b>Tesztelj rá azonnal:</b> mockolt indítással `codex-runtime.test.ts` + `gemini-runtime.test.ts` a fenti döntésekre, és `queue/index.test.ts` a próbálkozás-számlálásra + outbound állapotgépre. Ez „pinneli” az 1. lépést, hogy ne csússzon vissza.",
+  "<b>Gyors győzelmek egy batch-ben:</b> `npm audit fix`, env-guard, Slack-fájl méret-cap, codex-auth útfix, napi-napló időzóna, golyóálló `esc()` + szín-validáció, `post()` r.ok. Egy alacsony kockázatú commit-sorozat.",
+  "<b>Biztonsági határ (P1 #6):</b> a kitalálgatás-védelem trusted-proxy alapra állítása — a tényleg 0.0.0.0-n futó dashboardon visszaadja a védelem élét.",
+  "<b>A „Frissítés” gomb megszilárdítása (P1 #11 + korábbi #6):</b> reprodukálható telepítés, office-say újramásolása, visszaállás build-hibára, párhuzamos-futás-zár, frissítés előtti adatbázis-mentés — mielőtt a séma valaha változik.",
+  "<b>Ops-higiénia (P2 #12 + #18):</b> adatbázis-frissítési mechanizmus (a jövő frissítéseihez), majd minimális automata minőség-kapu (fordítás + teszt + szkript-ellenőrzés). A memória-javítások (#13/#14) bármikor becsúsztathatók."
+];
+
+const CAT_LABEL = {security:"Biztonság",robustness:"Megbízhatóság",correctness:"Korrektség",
+  architecture:"Architektúra",testing:"Tesztelés",ops:"Ops",dx:"DX / CI",deps:"Függőségek",quality:"Kódminőség"};
+
+// ---------- helpers ----------
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function fmt(s){return esc(s).replace(/`([^`]+)`/g,(_,c)=>"<code>"+c+"</code>");}
+const baseSev = s => s.includes("→") ? s.split("→")[1].trim() : s;
+
+// stat cards
+const stats = [{n:88,l:"nyers találat"},{n:38,l:"verifikálva"},{n:8,l:"terület"},{n:47,l:"ágens"}];
+["P0","P1","P2","P3"].forEach(p=>stats.push({n:DATA.filter(d=>d.prio===p).length,l:p==="P3"?"P3 / low":p,cls:p.toLowerCase(),prio:p}));
+document.getElementById("stats").innerHTML = stats.map(s=>
+  `<div class="stat ${s.cls||""} ${s.prio?"click":""}" ${s.prio?`data-goto="${s.prio}"`:""}>
+     <div class="n">${s.n}</div><div class="l">${esc(s.l)}</div></div>`).join("");
+
+// category bars
+(function(){
+  const counts={};DATA.forEach(d=>counts[d.cat]=(counts[d.cat]||0)+1);
+  const max=Math.max(...Object.values(counts));
+  document.getElementById("catbars").innerHTML=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>
+    `<div class="catbar"><span>${esc(CAT_LABEL[k]||k)}</span>
+       <div class="bar" style="width:${Math.round(v/max*100)}%"></div><span class="cn">${v}</span></div>`).join("");
+})();
+
+// category select
+(function(){
+  const sel=document.getElementById("catSel");
+  [...new Set(DATA.map(d=>d.cat))].sort().forEach(c=>{
+    const o=document.createElement("option");o.value=c;o.textContent=CAT_LABEL[c]||c;sel.appendChild(o);});
+})();
+
+// ---------- findings ----------
+const state={prio:"all",sev:"all",cat:"all",q:""};
+function passes(d){
+  if(state.prio!=="all"&&d.prio!==state.prio)return false;
+  if(state.sev!=="all"&&baseSev(d.sev)!==state.sev)return false;
+  if(state.cat!=="all"&&d.cat!==state.cat)return false;
+  if(state.q){const h=(d.title+" "+d.loc+" "+d.plain+" "+d.symptom+" "+d.tech+" "+d.fix+" "+d.cat).toLowerCase();
+    if(!h.includes(state.q.toLowerCase()))return false;}
+  return true;
+}
+function card(d){
+  const sv=baseSev(d.sev);
+  const changed=d.sev.includes("→")?`<span class="b changed">${esc(d.sev)}</span>`:"";
+  const idx=d.n!=null?("#"+d.n):"·";
+  return `<div class="card" data-p="${d.prio}">
+    <div class="card-h">
+      <span class="idx">${idx}</span>
+      <div class="card-main">
+        <div class="card-title">${fmt(d.title)}</div>
+        <div class="loc">${fmt(d.loc)}</div>
+      </div>
+      <div class="badges">
+        ${changed}
+        <span class="b sev-${sv}">${esc(sv)}</span>
+        <span class="b cat">${esc(CAT_LABEL[d.cat]||d.cat)}</span>
+        <span class="b eff">${esc(d.eff)}</span>
+        <span class="chev">▸</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="kv plain"><div class="k">👤 Köznyelven — mi a baj</div><div class="v">${fmt(d.plain)}</div></div>
+      <div class="symptom"><b>⚠️ Tünet:</b> ${fmt(d.symptom)}</div>
+      <div class="dev">
+        <div class="kv tech"><div class="k">🔧 Technikai részletek — fejlesztőnek / AI-nak</div><div class="v">${fmt(d.tech)}</div></div>
+        <div class="kv fix"><div class="k">✅ Javítás</div><div class="v">${fmt(d.fix)}</div></div>
+      </div>
+      <div class="devhint">A technikai részletek és a javítás elrejtve — kapcsold be fent a „Fejlesztői részletek” kapcsolót.</div>
+    </div>
+  </div>`;
+}
+function render(){
+  const list=DATA.filter(passes);
+  const sevRank={HIGH:0,MEDIUM:1,LOW:2,NIT:3},prioRank={P0:0,P1:1,P2:2,P3:3};
+  list.sort((a,b)=>prioRank[a.prio]-prioRank[b.prio]||sevRank[baseSev(a.sev)]-sevRank[baseSev(b.sev)]||((a.n||999)-(b.n||999)));
+  document.getElementById("list").innerHTML = list.length
+    ? list.map(card).join("") : `<div class="empty">Nincs a szűrőnek megfelelő találat.</div>`;
+  document.getElementById("count").textContent =
+    `${list.length} találat látszik (összesen ${DATA.length} akció-item)`;
+  document.querySelectorAll("#list .card-h").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
+}
+function wirePills(id,key){
+  document.querySelectorAll(`#${id} button`).forEach(b=>b.onclick=()=>{
+    document.querySelectorAll(`#${id} button`).forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");
+    state[key]=b.dataset[key==="prio"?"p":"s"];render();});
+}
+wirePills("prioPills","prio");wirePills("sevPills","sev");
+document.getElementById("catSel").onchange=e=>{state.cat=e.target.value;render();};
+document.getElementById("q").oninput=e=>{state.q=e.target.value;render();};
+let allOpen=false;
+document.getElementById("expandAll").onclick=e=>{
+  allOpen=!allOpen;
+  document.querySelectorAll("#list .card").forEach(c=>c.classList.toggle("open",allOpen));
+  e.target.textContent=allOpen?"Mind becsuk":"Mind kinyit";};
+
+// dev toggle
+document.getElementById("devChk").onchange=e=>document.body.classList.toggle("hide-dev",!e.target.checked);
+
+// prior audit
+document.getElementById("fixed").innerHTML=FIXED.map(x=>
+  `<div class="li fixed"><div class="t">${fmt(x.t)}<span class="tag ${x.tag[1]}">${esc(x.tag[0])}</span></div><div class="d">${fmt(x.d)}</div></div>`).join("");
+document.getElementById("open").innerHTML=OPEN.map(x=>
+  `<div class="li open"><div class="t">${fmt(x.t)}<span class="tag ${x.tag[1]}">${esc(x.tag[0])}</span></div><div class="d">${fmt(x.d)}</div></div>`).join("");
+
+// plan
+document.getElementById("qw").innerHTML=QUICKWINS.map(x=>`<li>${x}</li>`).join("");
+document.getElementById("steps").innerHTML=STEPS.map(x=>`<li>${x}</li>`).join("");
+
+// tabs
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll("section.tab").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+  document.getElementById(b.dataset.tab).classList.add("active");
+  window.scrollTo({top:0,behavior:"smooth"});});
+document.querySelectorAll(".stat.click").forEach(s=>s.onclick=()=>{
+  document.querySelector('#tabs button[data-tab="findings"]').click();
+  document.querySelector(`#prioPills button[data-p="${s.dataset.goto}"]`).click();});
+
+render();
+</script>
+</body>
+</html>
