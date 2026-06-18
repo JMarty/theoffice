@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readEnvFile } from "../env.js";
 import type { EngineConfig, AgentDef } from "../types.js";
 import { log } from "../logger.js";
-import { newSession } from "./tmux.js";
+import { newSession, sessionNameFor } from "./tmux.js";
 import { writeAgentSettings } from "./profile.js";
+import { buildAgentEnv } from "./agent-env.js";
 import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty } from "../queue/index.js";
 import { recordInbound } from "../memory/conversation.js";
+import { decideCodexOutcome } from "./exec-outcome.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 
 /**
@@ -28,6 +29,11 @@ const MAX_DELIVERY_ATTEMPTS = 5;
 // hold delivery rather than burn retries: the cap is transient, so we wait then try again. 15 min is gentle
 // and will succeed once the window rolls. If codex ever surfaces an exact reset time we can honor it here.
 const USAGE_BACKOFF_MS = 15 * 60_000;
+// Node-side watchdog: if `codex exec` wedges (no `close` ever fires), the agent would stay inFlight FOREVER
+// and the deliverer would skip every future message for it ("received but didn't act", only an engine
+// restart heals it). Kill a turn that overruns this so the item requeues and the agent frees up. Generous:
+// a real turn (tool calls, edits) finishes well inside this; only a genuine hang trips it.
+const TURN_TIMEOUT_MS = 14 * 60_000;
 // Heuristic match on codex output for "you hit a usage/rate limit" across stdout JSON + stderr text.
 const USAGE_LIMIT_RE =
   /usage limit|rate limit|too many requests|quota|\b429\b|try again later|limit reached|reached your .*limit|you (?:have|'ve) hit/i;
@@ -44,31 +50,16 @@ export function isCodexBusy(agentId: string): boolean {
   return false;
 }
 
-function codexEnv(cfg: EngineConfig, agent: AgentDef): Record<string, string> {
-  const home = process.env.HOME ?? "";
-  const env: Record<string, string> = {
-    // ~/.local/bin first so the exec can call office-say (Slack reply) and find the codex binary
-    PATH: `${home}/.local/bin:${process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`,
-    TZ: cfg.owner.timezone,
-    HOME: home,
-    OFFICE_AGENT_ID: agent.id,
-    OFFICE_TENANT_ROOT: cfg.paths.tenantRoot,
-    OFFICE_PORT: String(cfg.web.port),
-  };
-  for (const [k, v] of Object.entries(readEnvFile(join(agent.dir, ".env")))) env[k] = v;
-  return env;
-}
-
 /**
  * Launch an idle tmux HOLDER for a codex agent (so it reads as "running" + the reaper keeps it).
  * The actual turns run as `codex exec` subprocesses against agent.dir, not in this pane.
  */
 export function launchCodexHolder(cfg: EngineConfig, agent: AgentDef): boolean {
-  const session = `agent-${agent.id}`;
+  const session = sessionNameFor(agent.id);
   // benign idle process; never accepts injected input — codex work is the exec subprocess
   const command = ["bash", "-lc", "echo 'codex holder (work runs via codex exec)'; exec sleep infinity"];
   writeAgentSettings(cfg, agent); // keep the security profile regen parity with the claude path
-  const ok = newSession(cfg.tmux.socket, session, { cwd: agent.dir, command, env: codexEnv(cfg, agent) });
+  const ok = newSession(cfg.tmux.socket, session, { cwd: agent.dir, command, env: buildAgentEnv(cfg, agent) });
   logger.info({ agent: agent.id, session, ok }, ok ? "launched codex holder" : "codex holder skipped (exists?)");
   return ok;
 }
@@ -80,10 +71,8 @@ export function launchCodexHolder(cfg: EngineConfig, agent: AgentDef): boolean {
  */
 export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: QueuedItem): void {
   if (inFlight.has(agent.id)) return;
-  inFlight.add(agent.id);
-  markDelivering(item.id);
 
-  const env = codexEnv(cfg, agent);
+  const env = buildAgentEnv(cfg, agent);
   if (item.source === "channel" && item.reply_channel) {
     env.OFFICE_REPLY_CHANNEL = item.reply_channel;
     try {
@@ -100,13 +89,61 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   let sawCompleted = false;
   let sawUsageLimit = false;
   let buf = "";
-  // CRITICAL: stdin must be /dev/null (EOF), NOT an open pipe. `codex exec` reads stdin for "additional
-  // input" after the positional prompt; node's default stdio leaves stdin open, so codex blocks forever
-  // (futex wait, no session, no turn). "ignore" gives it immediate EOF so the turn runs. (Root cause of the
-  // first cutover smoke-test hang — 2026-06-12.)
-  const child = spawn("codex", args, { cwd: agent.dir, env, stdio: ["ignore", "pipe", "pipe"] });
 
-  child.stdout.on("data", (d: Buffer) => {
+  // Mark busy + charge the attempt only once we are actually about to spawn. A synchronous spawn throw
+  // (e.g. a broken cwd) must NOT leave the agent stuck inFlight, so the add is paired with try/catch.
+  inFlight.add(agent.id);
+  markDelivering(item.id);
+
+  // settle() runs the chosen terminal move exactly once, no matter which of close/error/timeout wins the race.
+  let settled = false;
+  const settle = (timedOut: boolean, code: number | null) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(watchdog);
+    inFlight.delete(agent.id);
+    const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, timedOut });
+    if (outcome.kind === "delivered") {
+      markDelivered(item.id);
+      recordInbound(item.agent_id, item.reply_channel, item.prompt);
+      logger.info({ id: item.id, agent: agent.id }, "codex prompt delivered (turn.completed)");
+    } else if (outcome.kind === "usage") {
+      cooldownUntil.set(agent.id, Date.now() + USAGE_BACKOFF_MS);
+      requeueNoPenalty(item.id);
+      logger.warn(
+        { id: item.id, agent: agent.id, backoffMin: USAGE_BACKOFF_MS / 60_000 },
+        "codex usage cap -> holding (no attempt charged)",
+      );
+    } else if (item.attempts >= MAX_DELIVERY_ATTEMPTS) {
+      markFailed(item.id, outcome.why);
+      logger.warn({ id: item.id, agent: agent.id, why: outcome.why, code }, "codex delivery failed (max attempts)");
+    } else {
+      requeue(item.id);
+      logger.warn({ id: item.id, agent: agent.id, why: outcome.why, code }, "codex exec not clean -> requeued");
+    }
+  };
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    // CRITICAL: stdin must be /dev/null (EOF), NOT an open pipe. `codex exec` reads stdin for "additional
+    // input" after the positional prompt; node's default stdio leaves stdin open, so codex blocks forever
+    // (futex wait, no session, no turn). "ignore" gives it immediate EOF so the turn runs. (Root cause of the
+    // first cutover smoke-test hang — 2026-06-12.)
+    child = spawn("codex", args, { cwd: agent.dir, env, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (err) {
+    inFlight.delete(agent.id);
+    requeue(item.id);
+    logger.warn({ id: item.id, agent: agent.id, err }, "codex spawn threw -> requeued (agent freed)");
+    return;
+  }
+
+  const watchdog = setTimeout(() => {
+    logger.warn({ id: item.id, agent: agent.id, timeoutMin: TURN_TIMEOUT_MS / 60_000 }, "codex turn wedged -> SIGKILL");
+    child.kill("SIGKILL");
+    settle(true, null);
+  }, TURN_TIMEOUT_MS);
+
+  child.stdout?.on("data", (d: Buffer) => {
     buf += d.toString();
     let nl: number;
     while ((nl = buf.indexOf("\n")) >= 0) {
@@ -122,44 +159,15 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
     }
   });
   // codex surfaces auth/limit errors on stderr too
-  child.stderr.on("data", (d: Buffer) => {
+  child.stderr?.on("data", (d: Buffer) => {
     if (USAGE_LIMIT_RE.test(d.toString())) sawUsageLimit = true;
   });
 
-  const fail = (why: string, code?: number | null) => {
-    inFlight.delete(agent.id);
-    // Usage cap = transient + not the message's fault: hold for a back-off window and DON'T charge an
-    // attempt, so the cap never marks the message failed. isCodexBusy() keeps it queued until cooldown ends.
-    if (sawUsageLimit) {
-      cooldownUntil.set(agent.id, Date.now() + USAGE_BACKOFF_MS);
-      requeueNoPenalty(item.id);
-      logger.warn(
-        { id: item.id, agent: agent.id, why, code, backoffMin: USAGE_BACKOFF_MS / 60_000 },
-        "codex usage cap -> holding (no attempt charged)",
-      );
-      return;
-    }
-    // requeue with a bounded budget for genuine errors
-    if (item.attempts >= MAX_DELIVERY_ATTEMPTS) {
-      markFailed(item.id, why);
-      logger.warn({ id: item.id, agent: agent.id, why, code }, "codex delivery failed (max attempts)");
-    } else {
-      requeue(item.id);
-      logger.warn({ id: item.id, agent: agent.id, why, code }, "codex exec not clean -> requeued");
-    }
-  };
-
-  child.on("close", (code) => {
-    if (code === 0 && sawCompleted) {
-      inFlight.delete(agent.id);
-      markDelivered(item.id);
-      recordInbound(item.agent_id, item.reply_channel, item.prompt);
-      logger.info({ id: item.id, agent: agent.id }, "codex prompt delivered (turn.completed)");
-    } else {
-      fail(`exit ${code}, turn.completed=${sawCompleted}`, code);
-    }
+  child.on("close", (code) => settle(false, code));
+  child.on("error", (err) => {
+    logger.warn({ id: item.id, agent: agent.id, err: String((err as Error).message ?? err) }, "codex spawn error");
+    settle(false, null);
   });
-  child.on("error", (err) => fail(`spawn error: ${String((err as Error).message ?? err)}`));
 }
 
 export const codexRuntime: Runtime = {
@@ -169,5 +177,7 @@ export const codexRuntime: Runtime = {
   models: [],
   launch: launchCodexHolder,
   isBusy: isCodexBusy,
+  // HOLDER-style: the dashboard can't read a Claude pane, so report live state from the exec tracker.
+  liveState: (agentId) => (isCodexBusy(agentId) ? "busy" : "idle"),
   deliver: deliverCodexPrompt,
 };

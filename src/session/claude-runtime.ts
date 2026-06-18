@@ -1,11 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readEnvFile } from "../env.js";
 import type { EngineConfig, AgentDef } from "../types.js";
 import { log } from "../logger.js";
 import { capturePane, clearInput, hasSession, newSession, sendKey, sendText, sessionNameFor } from "./tmux.js";
 import { detectPaneState, decideSubmitFollowup } from "./pane-state.js";
 import { writeAgentSettings } from "./profile.js";
+import { buildAgentEnv } from "./agent-env.js";
 import { ensureFolderTrusted } from "./trust.js";
 import { markDelivering, markDelivered, markFailed, requeue } from "../queue/index.js";
 import { recordInbound } from "../memory/conversation.js";
@@ -117,18 +117,9 @@ function launchClaude(cfg: EngineConfig, agent: AgentDef): boolean {
   const session = sessionNameFor(agent.id);
   const command = ["claude", "--dangerously-skip-permissions"];
   if (agent.model) command.push("--model", agent.model);
-  const home = process.env.HOME ?? "";
-  const env: Record<string, string> = {
-    // ~/.local/bin first so the agent can call `office-say` to reply on Slack
-    PATH: `${home}/.local/bin:${process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`,
-    TZ: cfg.owner.timezone,
-    HOME: home,
-    OFFICE_AGENT_ID: agent.id,
-    OFFICE_TENANT_ROOT: cfg.paths.tenantRoot,
-    OFFICE_PORT: String(cfg.web.port),
-  };
-  // per-agent secrets/env (e.g. an API key for one agent, scoped Drive creds for another)
-  for (const [k, v] of Object.entries(readEnvFile(join(agent.dir, ".env")))) env[k] = v;
+  // per-agent secrets/env applied first, then engine reserved keys win (PATH leads with ~/.local/bin so
+  // the agent can always call office-say); see buildAgentEnv.
+  const env = buildAgentEnv(cfg, agent);
   // regenerate the agent's security profile (connector + filesystem deny) before launch
   writeAgentSettings(cfg, agent);
   // pre-accept Claude's folder-trust gate; otherwise a fresh pane blocks on the
@@ -198,5 +189,7 @@ export const claudeRuntime: Runtime = {
   launch: launchClaude,
   // Readiness for a persistent TUI is decided live inside deliver() via pane state, not a tracked flag.
   isBusy: () => false,
+  // null -> the dashboard reads claude's live state from the actual pane, not a tracked flag.
+  liveState: () => null,
   deliver: deliverClaude,
 };

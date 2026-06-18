@@ -48,9 +48,16 @@ export function launchEnabledAgents(cfg: EngineConfig): void {
 export function startDeliverer(cfg: EngineConfig): () => void {
   const socket = cfg.tmux.socket;
   let stopped = false;
+  // Reentrancy guard: a claude delivery is async (~0.4-5.4s) and the queue item stays 'queued' across the
+  // ~250ms readiness await, so without this a second tick firing mid-delivery could pick the SAME item out
+  // of listQueued() and inject the prompt twice. The codex/gemini paths guard themselves with a synchronous
+  // inFlight.add, but the claude path does not — so we serialize ticks here: never start a tick while the
+  // previous one is still running.
+  let running = false;
 
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || running) return;
+    running = true;
     try {
       const byId = new Map(loadAgents(cfg).map((a) => [a.id, a]));
       for (const item of listQueued()) {
@@ -64,6 +71,8 @@ export function startDeliverer(cfg: EngineConfig): () => void {
       }
     } catch (err) {
       logger.error({ err }, "deliverer tick error");
+    } finally {
+      running = false;
     }
   };
 

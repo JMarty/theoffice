@@ -8,14 +8,15 @@ import { geminiRuntime } from "./gemini-runtime.js";
  * Provider-pluggable agent runtime registry.
  *
  * A "runtime" is the engine that drives one agent: how its tmux session is launched and how a queued
- * prompt is delivered + completed. Today two are wired — "claude" (Claude Code, a persistent TUI we
- * inject into) and "codex" (OpenAI Codex CLI, one `codex exec` subprocess per turn). Both hide behind
- * the SAME interface, so the rest of the engine (launch, deliverer loop, dashboard) is provider-agnostic:
- * flipping an agent's `runtime` flag swaps its whole execution path with no other code change.
+ * prompt is delivered + completed. Three are wired — "claude" (Claude Code, a persistent TUI we inject
+ * into), "codex" (OpenAI Codex CLI) and "gemini" (Google Antigravity CLI), the last two running one
+ * exec subprocess per turn. All hide behind the SAME interface, so the rest of the engine (launch,
+ * deliverer loop, dashboard) is provider-agnostic: flipping an agent's `runtime` flag swaps its whole
+ * execution path with no other code change.
  *
- * Adding a third provider (e.g. a local/ollama runtime, or gemini) is a single new module that exports a
- * `Runtime` and registers here — nothing else in the engine needs to know it exists. That is the whole
- * point: someone could stand a fleet up entirely on a non-Claude provider by flipping switches.
+ * Adding a fourth provider (e.g. a local/ollama runtime) is a single new module that exports a `Runtime`
+ * and registers here — nothing else in the engine needs to know it exists. That is the whole point:
+ * someone could stand a fleet up entirely on a non-Claude provider by flipping switches.
  */
 
 const logger = log("runtime");
@@ -50,6 +51,14 @@ export interface Runtime {
    * runtime (claude) returns false here and decides readiness inside deliver() from live pane state.
    */
   isBusy(agentId: string): boolean;
+
+  /**
+   * Live dashboard state for a RUNNING agent, for runtimes the dashboard can't read another way. A
+   * HOLDER-style runtime (codex/gemini) runs an idle tmux pane that pane-state can't classify, so it
+   * reports "busy" (a turn is in flight) or "idle" here. A persistent-TUI runtime (claude) returns null:
+   * its state is read live from the actual pane instead. Keeps the dashboard out of provider internals.
+   */
+  liveState(agentId: string): "busy" | "idle" | null;
 
   /**
    * Deliver one queued item. The runtime FULLY OWNS the queue bookkeeping for its delivery style —
