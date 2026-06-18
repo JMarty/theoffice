@@ -43,6 +43,24 @@ describe("recallForPrompt — bounded session-start preamble", () => {
     expect(out).not.toContain("WARM-should-be-dropped");
   });
 
+  it("still surfaces hot/warm even when many NEWER cold memories pile up (the recall-starvation bug)", () => {
+    saveMemory({ agentId: "starve", category: "hot", content: "the active task I must not forget" });
+    // 250 cold rows, all strictly newer than the hot one — the exact shape that used to yield 0 hot.
+    for (let i = 0; i < 250; i++) saveMemory({ agentId: "starve", category: "cold", content: `cold-noise-${i}` });
+
+    const out = recallForPrompt("starve", "");
+    expect(out).toContain("the active task I must not forget");
+  });
+
+  it("topical cold/shared is surfaced even alongside newer hot/warm matches", () => {
+    saveMemory({ agentId: "topic", category: "cold", content: "kubernetes ingress runbook from last year" });
+    // newer hot/warm rows that also match the query must NOT crowd the topical cold row out
+    for (let i = 0; i < 10; i++) saveMemory({ agentId: "topic", category: "hot", content: `kubernetes hot task ${i}` });
+
+    const out = recallForPrompt("topic", "kubernetes ingress");
+    expect(out).toContain("kubernetes ingress runbook from last year");
+  });
+
   it("surfaces a small agent's memory fully and untruncated", () => {
     saveMemory({ agentId: "small", category: "hot", content: "active task A" });
     saveMemory({ agentId: "small", category: "warm", content: "owner prefers X" });

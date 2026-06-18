@@ -27,12 +27,16 @@ function line(r: MemoryRow): string {
  * agent's CLAUDE.md: the engine guarantees a bounded recall even when the agent forgets to ask for it.
  */
 export function recallForPrompt(agentId: string, prompt: string): string {
-  const always = searchMemories({ agentId, limit: MAX_ALWAYS });
+  // Fetch hot+warm on their OWN tier filter (category IN) so a flood of newer cold/shared rows can't push
+  // the always-surface tiers out of a single mixed recency window (the bug: 1 hot + 250 newer cold -> 0 hot).
+  const always = searchMemories({ agentId, categories: ["hot", "warm"], limit: MAX_ALWAYS });
   const hot = always.filter((m) => m.category === "hot");
   const warm = always.filter((m) => m.category === "warm");
-  const topical = (prompt.trim() ? searchMemories({ agentId, q: prompt, limit: MAX_TOPICAL * 3 }) : [])
-    .filter((m) => m.category === "cold" || m.category === "shared")
-    .slice(0, MAX_TOPICAL);
+  // Topical block: prompt-matched cold/shared ONLY, filtered in SQL, so newer hot/warm matches can't
+  // saturate the small window and starve the intended on-topic history.
+  const topical = prompt.trim()
+    ? searchMemories({ agentId, q: prompt, categories: ["cold", "shared"], limit: MAX_TOPICAL })
+    : [];
 
   // Fill the byte budget in strict priority order; stop at the first entry that would overflow so the
   // most important tiers always win the space (a later, smaller entry never displaces a higher-priority one).

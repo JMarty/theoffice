@@ -62,6 +62,10 @@ export function parseInbound(event: unknown, selfBotUserId?: string): ParsedInbo
   if (e.subtype && e.subtype !== "file_share") return null;
   if (e.bot_id) return null; // any bot, including self
   if (selfBotUserId && e.user === selfBotUserId) return null;
+  // DM-only: the Slack manifest only subscribes to message.im, but enforce it here too so a future scope
+  // widening (e.g. channels:history) can't silently make agents react to public-channel posts. Reject a
+  // present, non-'im' channel_type; tolerate its absence so events that omit it aren't broken.
+  if (typeof e.channel_type === "string" && e.channel_type !== "im") return null;
   const text = typeof e.text === "string" ? e.text.trim() : "";
   const files = parseFiles(e.files);
   if (!text && files.length === 0) return null;

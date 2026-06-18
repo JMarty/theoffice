@@ -40,6 +40,11 @@ describe("parseInbound", () => {
     expect(parseInbound({ ...dm, subtype: "bot_message" }, "U_charly")).toBeNull();
   });
 
+  it("rejects a non-DM channel_type (DM-only enforced in code, not just the manifest)", () => {
+    expect(parseInbound({ ...dm, channel_type: "channel" }, "U_charly")).toBeNull();
+    expect(parseInbound({ ...dm, channel_type: "group" }, "U_charly")).toBeNull();
+  });
+
   it("rejects edits / system subtypes", () => {
     expect(parseInbound({ ...dm, subtype: "message_changed" }, "U_charly")).toBeNull();
     expect(parseInbound({ ...dm, subtype: "channel_join" }, "U_charly")).toBeNull();

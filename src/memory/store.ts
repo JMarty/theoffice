@@ -24,6 +24,8 @@ export interface SearchArgs {
   agentId?: string;
   q?: string;
   category?: MemoryTier;
+  /** restrict to a SET of tiers (category IN (...)); use instead of `category` for multi-tier fetches */
+  categories?: MemoryTier[];
   limit?: number;
 }
 
@@ -56,6 +58,10 @@ export function searchMemories(a: SearchArgs): MemoryRow[] {
   if (a.category) {
     where.push("m.category = ?");
     params.push(a.category);
+  }
+  if (a.categories && a.categories.length) {
+    where.push(`m.category IN (${a.categories.map(() => "?").join(",")})`);
+    params.push(...a.categories);
   }
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   params.push(limit);
