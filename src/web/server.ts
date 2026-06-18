@@ -108,15 +108,16 @@ interface RLEntry {
 }
 const rlMap = new Map<string, RLEntry>();
 
-// Reverse proxies the engine trusts to set X-Real-IP / X-Forwarded-For. Default: loopback only (a
-// same-host nginx / Nginx Proxy Manager / Caddy connects from 127.0.0.1). If the proxy runs on another
-// LAN host, set OFFICE_TRUSTED_PROXIES to its IP or CIDR (comma-separated). Set it empty to trust none.
-function parseTrustedProxies(): string[] {
+// Reverse proxies the engine trusts to set X-Real-IP / X-Forwarded-For. Precedence: config
+// (web.trustedProxies) -> env OFFICE_TRUSTED_PROXIES -> loopback only (a same-host nginx / Nginx Proxy
+// Manager / Caddy connects from 127.0.0.1). If the proxy runs on another LAN host, list its IP/CIDR. An
+// explicit empty list trusts none.
+function resolveTrustedProxies(cfg: EngineConfig): string[] {
+  if (cfg.web.trustedProxies) return cfg.web.trustedProxies;
   const raw = process.env.OFFICE_TRUSTED_PROXIES;
   if (raw == null) return ["127.0.0.1", "::1"];
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
-const TRUSTED_PROXIES = parseTrustedProxies();
 
 /** Strip the IPv4-mapped-IPv6 prefix so "::ffff:127.0.0.1" compares as "127.0.0.1". */
 function normalizeIp(ip: string): string {
@@ -170,18 +171,16 @@ export function resolveClientIp(
   return normalizeIp(peer);
 }
 
-function getClientIp(req: IncomingMessage): string {
-  return resolveClientIp(req.socket.remoteAddress || "unknown", req.headers, TRUSTED_PROXIES);
-}
-
 export function startServer(cfg: EngineConfig): () => void {
   const token = getOrCreateToken(cfg.paths.dashboardTokenFile);
+  const trustedProxies = resolveTrustedProxies(cfg);
+  logger.info({ trustedProxies }, "client-ip trust list");
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${cfg.web.host}:${cfg.web.port}`);
     const path = url.pathname;
     if (path.startsWith("/api/")) {
-      const ip = getClientIp(req);
+      const ip = resolveClientIp(req.socket.remoteAddress || "unknown", req.headers, trustedProxies);
       const rl = cfg.web.rateLimit || { maxFails: 5, windowMs: 900000, blockMs: 60000, maxBlockMs: 3600000 };
       const nowMs = _now();
 

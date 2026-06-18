@@ -79,6 +79,14 @@ export interface PathsConfig {
 export interface WebConfig {
   host: string;
   port: number;
+  /**
+   * Reverse proxies whose `X-Real-IP` / `X-Forwarded-For` the dashboard trusts (IPs or IPv4 CIDRs). A
+   * forwarding header from any OTHER peer is ignored and the real socket address is used instead, so a
+   * LAN-direct client can't spoof its IP to slip past the brute-force limiter. Unset falls back to the
+   * `OFFICE_TRUSTED_PROXIES` env var, else loopback only (a same-host proxy). Set this to your reverse
+   * proxy's address when it runs on another LAN host (e.g. Nginx Proxy Manager).
+   */
+  trustedProxies?: string[];
   rateLimit?: {
     maxFails: number;
     windowMs: number;

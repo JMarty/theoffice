@@ -7,5 +7,9 @@
     "timezone": "UTC"
   },
   "channel": { "provider": "slack" },
-  "web": { "host": "127.0.0.1", "port": 3430 }
+  "web": {
+    "host": "127.0.0.1",
+    "port": 3430,
+    "_comment_trustedProxies": "Optional. Only add if a reverse proxy on ANOTHER host fronts the dashboard — then list its IP/CIDR, e.g. [\"127.0.0.1\", \"::1\", \"192.168.1.50\"], so its X-Real-IP is honored. Omit entirely when the proxy is same-host or there is none (loopback is trusted by default)."
+  }
 }
