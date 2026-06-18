@@ -4,15 +4,24 @@
    All numbers are wired to the live engine API; nothing is hard-coded per agent. */
 
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Quote-safe HTML escape: also escapes ' and ` so a value interpolated inside a single/back-quoted
+// attribute can never break out of it (defense-in-depth; today every slot is owner/server data).
+const esc = (s) => String(s ?? "").replace(/[&<>"'`]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" }[c]));
 
 let TOKEN = localStorage.getItem("office_token") || "";
 
 // ---------------- API ----------------
+async function failFor(r) {
+  // Surface a server error message when there is one, so a failed write never returns a misleading body.
+  let detail = "";
+  try { detail = (await r.json())?.error || ""; } catch { /* no/!json body */ }
+  return new Error(`request failed (${r.status})${detail ? " — " + detail : ""}`);
+}
 async function api(path) {
   const r = await fetch(path, { headers: { authorization: `Bearer ${TOKEN}` } });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
+  if (!r.ok) throw await failFor(r);
   return r.json();
 }
 async function post(path, body) {
@@ -23,6 +32,8 @@ async function post(path, body) {
   });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
+  // A non-2xx write (400/404/500) must NOT look successful: throw so the caller can surface it.
+  if (!r.ok) throw await failFor(r);
   return r.json();
 }
 
@@ -365,8 +376,11 @@ const VIEWS = {
           }).join("")
           : `<div class="empty">no memories match</div>`;
       };
-      const s = $("#mem-q"); if (s) s.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
-      run();
+      // run() is fired detached from setTimeout (not awaited), so guard it: api() now throws on any non-2xx,
+      // and an unhandled rejection here would just silently leave the list stale. Surface it in the panel.
+      const safeRun = () => run().catch((e) => { const el = $("#mem-list"); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
+      const s = $("#mem-q"); if (s) s.addEventListener("keydown", (e) => { if (e.key === "Enter") safeRun(); });
+      safeRun();
     }, 0);
     return `<div class="filterrow">
         ${chips.map(([v, l, n]) => `<button class="chip${active === v ? " active" : ""}" onclick="setMemTier('${v}')">${l} ${n}</button>`).join("")}
@@ -520,11 +534,18 @@ window.showTab = showTab;
 window.setMemTier = (v) => { window._memTier = v; showTab("memory"); };
 window.setUsageWin = (w) => { window._usageWin = w; showTab("usage"); };
 
-window.setModel = async (id, sel) => { sel.disabled = true; await post(`/api/agents/${id}/model`, { model: sel.value }); await softRefresh(); };
+window.setModel = async (id, sel) => {
+  sel.disabled = true;
+  try { await post(`/api/agents/${id}/model`, { model: sel.value }); }
+  catch (e) { alert("Could not change model: " + e.message); }
+  await softRefresh();
+};
 window.setRuntime = async (id, sel) => {
   sel.disabled = true;
-  const r = await post(`/api/agents/${id}/runtime`, { runtime: sel.value });
-  if (r && r.warning) alert(r.warning);
+  try {
+    const r = await post(`/api/agents/${id}/runtime`, { runtime: sel.value });
+    if (r && r.warning) alert(r.warning);
+  } catch (e) { alert("Could not change runtime: " + e.message); }
   await softRefresh();
 };
 window.agentAction = async (id, action) => {
@@ -541,10 +562,15 @@ window.agentAction = async (id, action) => {
 };
 window.setEnabled = async (id, enabled) => {
   if (!enabled && !confirm(`Disable ${nm(id)}?`)) return;
-  await post(`/api/agents/${id}/enabled`, { enabled });
+  try { await post(`/api/agents/${id}/enabled`, { enabled }); }
+  catch (e) { alert("Could not change enabled state: " + e.message); }
   setTimeout(softRefresh, 800);
 };
-window.moveCard = async (id, sel) => { await post(`/api/kanban/${encodeURIComponent(id)}/status`, { status: sel.value }); await showTab("kanban"); renderStrip(); renderTabs(); };
+window.moveCard = async (id, sel) => {
+  try { await post(`/api/kanban/${encodeURIComponent(id)}/status`, { status: sel.value }); }
+  catch (e) { alert("Could not move card: " + e.message); }
+  await showTab("kanban"); renderStrip(); renderTabs();
+};
 window.doUpdate = async (btn) => {
   if (!confirm("Update now? The dashboard rebuilds and briefly restarts — your agents keep running.")) return;
   btn.disabled = true; btn.textContent = "Updating… (~30s)";
