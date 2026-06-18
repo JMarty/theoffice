@@ -5,6 +5,35 @@ dashboard ⟳ Update button), skim the entries newer than your previous version.
 
 ---
 
+## Reliability fix pass + trusted-proxy change (2026-06-18)
+
+A broad correctness/reliability pass implementing the 2026-06-17 code audit. Full per-fix
+detail: [`docs/FIXES-2026-06-18.md`](docs/FIXES-2026-06-18.md). Most changes need no action.
+Two things to know:
+
+**⚠️ ACTION if a reverse proxy on ANOTHER host fronts your dashboard.**
+The dashboard now only honors the `X-Real-IP` / `X-Forwarded-For` headers when the request's
+direct peer is a **trusted proxy** — otherwise a LAN-direct client could spoof its IP and dodge
+the brute-force limiter. The default trusts **loopback only** (a same-host nginx / Nginx Proxy
+Manager / Caddy). If your proxy runs on a **different host**, list its IP/CIDR so its real-IP
+header is honored again, in `tenant/config/overrides.json`:
+
+```json
+"web": { "trustedProxies": ["127.0.0.1", "::1", "192.168.1.50"] }
+```
+
+(or set `OFFICE_TRUSTED_PROXIES=192.168.1.50` in the service env). Without this, the limiter still
+works — it just groups failed attempts by the proxy's IP, and a **valid token always passes**, so
+you can never lock yourself out. Restart after editing: `systemctl --user restart theoffice.service`.
+
+**The ⟳ Update button is now safer** — it installs deps reproducibly (`npm ci`), re-installs the
+`office-say` helper, snapshots the DB first, and rolls the source tree back if the build fails. No
+action needed.
+
+**Installer source** now points at `github.com/JMarty/theoffice`.
+
+---
+
 ## Dashboard Rate Limiting & Nginx (2026-06-15)
 
 The dashboard now enforces brute-force lockout rate limiting (401 errors) based on IP addresses.
