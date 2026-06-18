@@ -30,6 +30,23 @@ function findRepoRoot(start: string): string {
 
 const REPO_ROOT = process.env.OFFICE_HOME ?? findRepoRoot(HERE);
 
+/**
+ * Read a numeric env override safely. A bare `Number("3430x")` is NaN, which silently corrupts config:
+ * a NaN port binds an ephemeral random port, and NaN rate-limit values make every comparison false so the
+ * brute-force limiter fails OPEN. So an unparseable (or, when required, non-positive) value WARNS and keeps
+ * the default instead of poisoning the config.
+ */
+function numEnv(name: string, fallback: number, opts: { positive?: boolean } = {}): number {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || (opts.positive && n <= 0)) {
+    console.warn(`[config] ${name}=${JSON.stringify(raw)} is not a valid${opts.positive ? " positive" : ""} number — keeping default ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -100,20 +117,21 @@ export function loadConfig(): EngineConfig {
 
   let cfg = deepMerge(platform, product, tenant);
 
-  // Select env overrides (ops convenience; never for secrets).
-  if (process.env.OFFICE_PORT) cfg.web.port = Number(process.env.OFFICE_PORT);
+  // Select env overrides (ops convenience; never for secrets). Numeric ones go through numEnv so a typo
+  // can't NaN-poison the port or silently disable the rate limiter.
+  cfg.web.port = numEnv("OFFICE_PORT", cfg.web.port, { positive: true });
   if (process.env.OFFICE_HOST) cfg.web.host = process.env.OFFICE_HOST;
   if (process.env.OFFICE_MAIN_AGENT) cfg.mainAgentId = process.env.OFFICE_MAIN_AGENT;
   if (process.env.OFFICE_TMUX_SOCKET) cfg.tmux.socket = process.env.OFFICE_TMUX_SOCKET;
   if (process.env.TZ) cfg.owner.timezone = process.env.TZ;
-  
+
   if (!cfg.web.rateLimit) {
     cfg.web.rateLimit = { maxFails: 5, windowMs: 900000, blockMs: 60000, maxBlockMs: 3600000 };
   }
-  if (process.env.OFFICE_RL_MAX_FAILS) cfg.web.rateLimit.maxFails = Number(process.env.OFFICE_RL_MAX_FAILS);
-  if (process.env.OFFICE_RL_WINDOW_MS) cfg.web.rateLimit.windowMs = Number(process.env.OFFICE_RL_WINDOW_MS);
-  if (process.env.OFFICE_RL_BLOCK_MS) cfg.web.rateLimit.blockMs = Number(process.env.OFFICE_RL_BLOCK_MS);
-  if (process.env.OFFICE_RL_MAX_BLOCK_MS) cfg.web.rateLimit.maxBlockMs = Number(process.env.OFFICE_RL_MAX_BLOCK_MS);
+  cfg.web.rateLimit.maxFails = numEnv("OFFICE_RL_MAX_FAILS", cfg.web.rateLimit.maxFails, { positive: true });
+  cfg.web.rateLimit.windowMs = numEnv("OFFICE_RL_WINDOW_MS", cfg.web.rateLimit.windowMs, { positive: true });
+  cfg.web.rateLimit.blockMs = numEnv("OFFICE_RL_BLOCK_MS", cfg.web.rateLimit.blockMs, { positive: true });
+  cfg.web.rateLimit.maxBlockMs = numEnv("OFFICE_RL_MAX_BLOCK_MS", cfg.web.rateLimit.maxBlockMs ?? 3600000, { positive: true });
 
   cached = cfg;
   return cfg;

@@ -82,12 +82,3 @@ export function newSession(socket: string, name: string, opts: NewSessionOpts): 
 export function killSession(socket: string, name: string): void {
   tmux(socket, ["kill-session", "-t", name]);
 }
-
-/** Ensure the dedicated tmux server is up (no-op if already running). */
-export function ensureServer(socket: string): void {
-  // starting the server with a throwaway keepalive session is handled by the
-  // systemd tmux unit in production; in dev this lazily starts it.
-  if (listSessions(socket).length === 0 && !hasSession(socket, "__keepalive")) {
-    tmux(socket, ["new-session", "-d", "-s", "__keepalive", "sleep 86400"]);
-  }
-}

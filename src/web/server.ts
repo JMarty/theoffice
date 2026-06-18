@@ -17,9 +17,7 @@ import { checkUpdates, applyUpdate } from "./update.js";
 import { sessionNameFor, launchAgent } from "../session/session-manager.js";
 import { hasSession, capturePane, killSession } from "../session/tmux.js";
 import { detectPaneState } from "../session/pane-state.js";
-import { isCodexBusy } from "../session/codex-runtime.js";
-import { isGeminiBusy } from "../session/gemini-runtime.js";
-import { isKnownRuntime, listRuntimes, DEFAULT_RUNTIME } from "../session/runtime.js";
+import { isKnownRuntime, listRuntimes, DEFAULT_RUNTIME, runtimeFor } from "../session/runtime.js";
 import { getOrCreateToken, checkBearer } from "./auth.js";
 import { log } from "../logger.js";
 
@@ -38,6 +36,13 @@ const MIME: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
 };
 
 function json(res: ServerResponse, code: number, body: unknown): void {
@@ -46,16 +51,50 @@ function json(res: ServerResponse, code: number, body: unknown): void {
   res.end(s);
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+// Hard cap on a request body. Bodies are token-gated JSON (kanban cards, memories, ...), never uploads,
+// so a megabyte is already generous; anything larger is a bug or abuse.
+const MAX_BODY_BYTES = 1_000_000;
+
+/**
+ * Read a request body as a string, or resolve null if it exceeds the cap or the socket closes before the
+ * body completes. The promise is GUARANTEED to settle: after `req.destroy()` Node v22 fires only 'close'
+ * (not 'end'/'error'), so a missing 'close' settle was the original hang — an oversize/aborted request
+ * left the handler waiting forever and leaked the promise. We settle on the first of end/close/error.
+ */
+function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve) => {
     let data = "";
+    let done = false;
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
     req.on("data", (c) => {
       data += c;
-      if (data.length > 1_000_000) req.destroy();
+      if (data.length > MAX_BODY_BYTES) {
+        finish(null);
+        req.destroy();
+      }
     });
-    req.on("end", () => resolve(data));
-    req.on("error", () => resolve(""));
+    req.on("end", () => finish(data));
+    req.on("close", () => finish(null)); // socket closed before 'end' (incl. our destroy) -> settle, never hang
+    req.on("error", () => finish(null));
   });
+}
+
+/**
+ * Read + parse a JSON body. Returns the parsed object (or null if the body wasn't valid JSON). If the body
+ * was too large / the connection dropped, sends 413 and returns `undefined` — the caller MUST `return` then,
+ * since the response is already finished.
+ */
+async function readJson(req: IncomingMessage, res: ServerResponse): Promise<JsonBody | null | undefined> {
+  const raw = await readBody(req);
+  if (raw === null) {
+    json(res, 413, { error: "request body too large or connection closed" });
+    return undefined;
+  }
+  return parseJson(raw);
 }
 
 export let _now = () => Date.now();
@@ -69,20 +108,70 @@ interface RLEntry {
 }
 const rlMap = new Map<string, RLEntry>();
 
-function getClientIp(req: IncomingMessage): string {
-  // Prefer X-Real-IP: reverse proxies (nginx, Nginx Proxy Manager, Caddy) set this to
-  // the real client address and OVERWRITE any client-sent value, so it is trustworthy.
-  // X-Forwarded-For via $proxy_add_x_forwarded_for APPENDS the real IP, so a client can
-  // spoof the first hop — only fall back to it (last entry = real client) when X-Real-IP
-  // is absent.
-  const xri = req.headers["x-real-ip"];
-  if (typeof xri === "string" && xri.trim()) return xri.trim();
-  const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.trim()) {
-    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1]!;
+// Reverse proxies the engine trusts to set X-Real-IP / X-Forwarded-For. Default: loopback only (a
+// same-host nginx / Nginx Proxy Manager / Caddy connects from 127.0.0.1). If the proxy runs on another
+// LAN host, set OFFICE_TRUSTED_PROXIES to its IP or CIDR (comma-separated). Set it empty to trust none.
+function parseTrustedProxies(): string[] {
+  const raw = process.env.OFFICE_TRUSTED_PROXIES;
+  if (raw == null) return ["127.0.0.1", "::1"];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+const TRUSTED_PROXIES = parseTrustedProxies();
+
+/** Strip the IPv4-mapped-IPv6 prefix so "::ffff:127.0.0.1" compares as "127.0.0.1". */
+function normalizeIp(ip: string): string {
+  return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+}
+function ipv4ToInt(ip: string): number | null {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null;
+  let n = 0;
+  for (let i = 1; i <= 4; i++) {
+    const o = Number(m[i]);
+    if (o > 255) return null;
+    n = n * 256 + o;
   }
-  return req.socket.remoteAddress || "unknown";
+  return n >>> 0;
+}
+/** Exact-IP match, or IPv4 CIDR membership (a.b.c.d/n). IPv6 is matched exactly only. */
+function ipMatches(ip: string, rule: string): boolean {
+  const p = normalizeIp(ip);
+  const r = normalizeIp(rule);
+  if (!r.includes("/")) return p === r;
+  const [net, bitsS] = r.split("/");
+  const bits = Number(bitsS);
+  const a = ipv4ToInt(p);
+  const b = ipv4ToInt(net!);
+  if (a === null || b === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (a & mask) === (b & mask);
+}
+
+/**
+ * Resolve the client IP used for brute-force rate limiting. Pure + testable. Proxy-set forwarding headers
+ * are honored ONLY when the DIRECT peer is a trusted proxy; otherwise a LAN-direct client (the engine binds
+ * 0.0.0.0 in this deployment) could spoof X-Real-IP / X-Forwarded-For and give every guess a fresh bucket,
+ * defeating the limiter. Untrusted peer -> use the real socket address.
+ */
+export function resolveClientIp(
+  peer: string,
+  headers: IncomingMessage["headers"],
+  trusted: string[],
+): string {
+  if (trusted.some((t) => ipMatches(peer, t))) {
+    const xri = headers["x-real-ip"];
+    if (typeof xri === "string" && xri.trim()) return xri.trim();
+    const xff = headers["x-forwarded-for"];
+    if (typeof xff === "string" && xff.trim()) {
+      const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1]!;
+    }
+  }
+  return normalizeIp(peer);
+}
+
+function getClientIp(req: IncomingMessage): string {
+  return resolveClientIp(req.socket.remoteAddress || "unknown", req.headers, TRUSTED_PROXIES);
 }
 
 export function startServer(cfg: EngineConfig): () => void {
@@ -217,13 +306,12 @@ async function handleApi(
       const running = hasSession(cfg.tmux.socket, session);
       let state = "offline";
       if (running) {
-        if (a.runtime === "codex") {
-          // codex agents run an idle tmux HOLDER (not a Claude TUI), so pane-state can't classify them.
-          // Liveness comes from the exec tracker instead: a turn in flight = busy, otherwise idle.
-          state = isCodexBusy(a.id) ? "busy" : "idle";
-        } else if (a.runtime === "gemini") {
-          // gemini (Antigravity) also runs an idle HOLDER, not a Claude TUI — same deal as codex.
-          state = isGeminiBusy(a.id) ? "busy" : "idle";
+        // HOLDER-style runtimes (codex/gemini) run an idle tmux pane that pane-state can't classify, so
+        // they report their own live state; claude returns null and we read its real pane instead. The
+        // dashboard stays out of provider internals — adding a runtime needs no edit here.
+        const live = runtimeFor(a).liveState(a.id);
+        if (live) {
+          state = live;
         } else {
           const pane = capturePane(cfg.tmux.socket, session);
           state = pane ? detectPaneState(pane) : "unknown";
@@ -285,7 +373,9 @@ async function handleApi(
   // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
   // A dirty working tree returns {ok:false,dirty:true,files} unless discard:true is sent (auto-stash + pull).
   if (path === "/api/update/apply" && m === "POST") {
-    const b = parseJson(await readBody(req)) ?? {};
+    const _raw = await readJson(req, res);
+    if (_raw === undefined) return;
+    const b = _raw ?? {};
     try {
       return json(res, 200, applyUpdate({ discardLocal: b.discard === true }));
     } catch (e) {
@@ -304,9 +394,10 @@ async function handleApi(
   }
   // POST /api/daily-log (alias /api/daily-logs) — live write path; replaces raw-sqlite daily-log writes
   if ((path === "/api/daily-log" || path === "/api/daily-logs") && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.agentId || !b?.content) return json(res, 400, { error: "agentId and content required" });
-    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Budapest" });
+    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: cfg.owner.timezone });
     const r = db.prepare(`INSERT INTO daily_logs (agent_id, date, content) VALUES (?, ?, ?)`).run(b.agentId, date, b.content);
     return json(res, 200, { id: Number(r.lastInsertRowid) });
   }
@@ -322,7 +413,8 @@ async function handleApi(
     return json(res, 200, rows);
   }
   if (path === "/api/memories" && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.agentId || !b?.content) return json(res, 400, { error: "agentId and content required" });
     const id = saveMemory({ agentId: b.agentId, content: b.content, category: b.category, keywords: b.keywords });
     return json(res, 200, { id });
@@ -338,7 +430,8 @@ async function handleApi(
   }
   // POST /api/kanban — create a card (live write path; replaces raw-sqlite card creation)
   if (path === "/api/kanban" && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.title) return json(res, 400, { error: "title required" });
     if (b.status && !["planned", "in_progress", "waiting", "done"].includes(b.status)) return json(res, 400, { error: "bad status" });
     if (b.priority && !["low", "normal", "high", "urgent"].includes(b.priority)) return json(res, 400, { error: "bad priority" });
@@ -371,14 +464,22 @@ async function handleApi(
     return json(res, 200, rows);
   }
   if (path === "/api/messages" && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.from || !b?.to || !b?.content) return json(res, 400, { error: "from, to, content required" });
+    // Validate routing endpoints against the live roster: a typo'd from/to would otherwise create a bus
+    // message that never reaches anyone (silent data-integrity footgun).
+    const ids = new Set(loadAgents(cfg).map((a) => a.id));
+    if (!ids.has(b.from) || !ids.has(b.to)) {
+      return json(res, 400, { error: "unknown agent", from: b.from, to: b.to });
+    }
     const id = sendAgentMessage(b.from, b.to, b.content);
     return json(res, 200, { id });
   }
   // POST /api/messages/done {id} — target agent closes a delivered message
   if (path === "/api/messages/done" && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.id) return json(res, 400, { error: "id required" });
     const info = db.prepare(`UPDATE agent_messages SET status='done', result=?, completed_at=unixepoch() WHERE id=?`).run(b.result ?? null, b.id);
     if (info.changes === 0) return json(res, 404, { error: "message not found", id: b.id });
@@ -387,8 +488,10 @@ async function handleApi(
 
   // POST /api/outbound {agent, channel, text} — agent reply path (-> outbound_queue -> Slack)
   if (path === "/api/outbound" && m === "POST") {
-    const b = parseJson(await readBody(req));
+    const b = await readJson(req, res);
+    if (b === undefined) return;
     if (!b?.agent || !b?.channel || !b?.text) return json(res, 400, { error: "agent, channel, text required" });
+    if (!loadAgents(cfg).some((a) => a.id === b.agent)) return json(res, 400, { error: "unknown agent", agent: b.agent });
     const id = enqueueOutbound(b.agent, b.channel, b.text);
     return json(res, 200, { id });
   }
@@ -429,7 +532,9 @@ async function handleApi(
     // model / enabled edit agent.json then take effect
     const metaPath = join(agent.dir, "agent.json");
     const meta = existsSync(metaPath) ? (parseJson(readFileSync(metaPath, "utf8")) ?? {}) : {};
-    const body = parseJson(await readBody(req)) ?? {};
+    const _raw = await readJson(req, res);
+    if (_raw === undefined) return;
+    const body = _raw ?? {};
     if (action === "model") {
       const mv = typeof body.model === "string" ? body.model : "default";
       if (mv && mv !== "default") meta.model = mv;
@@ -475,7 +580,9 @@ async function handleApi(
   // --- kanban move : /api/kanban/<id>/status {status} ---
   const km = path.match(/^\/api\/kanban\/([^/]+)\/status$/);
   if (km && m === "POST") {
-    const body = parseJson(await readBody(req)) ?? {};
+    const _raw = await readJson(req, res);
+    if (_raw === undefined) return;
+    const body = _raw ?? {};
     const st = body.status;
     if (!["planned", "in_progress", "waiting", "done"].includes(st)) return json(res, 400, { error: "bad status" });
     const id = decodeURIComponent(km[1]!);
@@ -496,7 +603,9 @@ async function handleApi(
   // --- memory category update : /api/memories/<id>/category {category} — live hot->cold reclass path ---
   const mc = path.match(/^\/api\/memories\/([^/]+)\/category$/);
   if (mc && m === "POST") {
-    const b = parseJson(await readBody(req)) ?? {};
+    const _raw = await readJson(req, res);
+    if (_raw === undefined) return;
+    const b = _raw ?? {};
     if (!["hot", "warm", "cold", "shared"].includes(b.category)) return json(res, 400, { error: "bad category" });
     const id = decodeURIComponent(mc[1]!);
     const info = db.prepare(`UPDATE memories SET category=? WHERE id=?`).run(b.category, id);

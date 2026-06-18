@@ -56,7 +56,9 @@ export function loadAgents(cfg: EngineConfig): AgentDef[] {
       allowFrom: meta.allowFrom,
       profile: meta.profile,
       role: meta.role,
-      color: meta.color,
+      // accept only a valid hex color; anything else is dropped so it can't be interpolated into a
+      // dashboard style attribute (the UI falls back to its deterministic palette when unset).
+      color: meta.color && /^#[0-9a-fA-F]{3,8}$/.test(meta.color) ? meta.color : undefined,
       // normalize against the runtime registry: unknown/unset resolves to the default (safe revert semantics)
       runtime: isKnownRuntime(meta.runtime) ? meta.runtime : DEFAULT_RUNTIME,
     });

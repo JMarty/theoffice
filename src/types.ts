@@ -104,8 +104,4 @@ export interface OwnerConfig {
 
 export interface ChannelConfig {
   provider: "slack" | "none";
-  /** workspace-level Socket Mode app token (xapp-...) — value lives in secrets, not config */
-  appTokenRef?: string;
-  /** default bot token ref for outbound when an agent has no own token */
-  botTokenRef?: string;
 }

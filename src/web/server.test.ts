@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { startServer, _setClock } from "./server.js";
+import { startServer, _setClock, resolveClientIp } from "./server.js";
 import { join } from "node:path";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -106,5 +106,36 @@ describe("Dashboard Rate Limiting", () => {
     const second = await req("bad", ip);
     expect(second.status).toBe(429);
     expect(second.retryAfter).toBe("10"); // escalated: 5000 * 2 / 1000
+  });
+});
+
+describe("resolveClientIp — proxy headers honored only from a trusted peer", () => {
+  const TRUST = ["127.0.0.1", "::1"];
+
+  it("honors X-Real-IP when the peer is a trusted proxy", () => {
+    expect(resolveClientIp("127.0.0.1", { "x-real-ip": "9.9.9.9" } as any, TRUST)).toBe("9.9.9.9");
+  });
+
+  it("honors the LAST X-Forwarded-For hop from a trusted proxy", () => {
+    expect(resolveClientIp("127.0.0.1", { "x-forwarded-for": "1.1.1.1, 2.2.2.2" } as any, TRUST)).toBe("2.2.2.2");
+  });
+
+  it("IGNORES spoofed headers from an untrusted (LAN-direct) peer — uses the real socket IP", () => {
+    const ip = resolveClientIp("192.168.5.50", { "x-real-ip": "1.2.3.4", "x-forwarded-for": "5.6.7.8" } as any, TRUST);
+    expect(ip).toBe("192.168.5.50");
+  });
+
+  it("normalizes IPv4-mapped IPv6 loopback so it still counts as trusted", () => {
+    expect(resolveClientIp("::ffff:127.0.0.1", { "x-real-ip": "9.9.9.9" } as any, TRUST)).toBe("9.9.9.9");
+  });
+
+  it("supports an IPv4 CIDR trust rule for a separate-host proxy", () => {
+    expect(resolveClientIp("192.168.5.10", { "x-real-ip": "9.9.9.9" } as any, ["192.168.5.0/24"])).toBe("9.9.9.9");
+    // outside the CIDR -> untrusted -> header ignored
+    expect(resolveClientIp("192.168.6.10", { "x-real-ip": "9.9.9.9" } as any, ["192.168.5.0/24"])).toBe("192.168.6.10");
+  });
+
+  it("falls back to the socket IP when a trusted peer sends no forwarding header", () => {
+    expect(resolveClientIp("127.0.0.1", {} as any, TRUST)).toBe("127.0.0.1");
   });
 });
