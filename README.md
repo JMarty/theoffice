@@ -7,7 +7,7 @@ agent a distinct colleague you DM directly.
 ## Install (fresh Debian/Ubuntu server)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/szoszo/theoffice/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JMarty/theoffice/main/bootstrap.sh | bash
 ```
 
 Run it as your normal user (it `sudo`s only for apt). It installs all dependencies (Node, tmux,

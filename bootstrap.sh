@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Office — one-paste installer for a fresh Debian/Ubuntu home server.
-#   curl -fsSL https://raw.githubusercontent.com/szoszo/theoffice/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/JMarty/theoffice/main/bootstrap.sh | bash
 # Installs all dependencies, the engine (NO agents/memories — a clean tenant),
 # then launches the guided onboarding wizard. Run as your normal user (it sudo's
 # only for apt). Nothing of the author's data is included.
@@ -12,7 +12,7 @@ set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] && { echo "Run as your normal user (it will sudo for apt), NOT as root." >&2; exit 1; }
 
-REPO="${OFFICE_REPO:-https://github.com/szoszo/theoffice.git}"
+REPO="${OFFICE_REPO:-https://github.com/JMarty/theoffice.git}"
 DIR="${OFFICE_DIR:-$HOME/theoffice}"
 say(){ printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
