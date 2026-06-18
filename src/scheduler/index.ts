@@ -97,6 +97,12 @@ export function fireDueTasks(cfg: EngineConfig, nowMs: number): number {
   return fired;
 }
 
+/**
+ * NO CATCH-UP BY DESIGN: the scheduler only fires tasks due in the CURRENT minute. If the engine is down
+ * (suspend, restart, self-update) across a task's minute, that occurrence is skipped — it is NOT backfilled
+ * on the next boot. This is deliberate: a backfill after a long outage would replay a burst of missed daily
+ * tasks at once. If a task must run "the next time we're up", model it that way explicitly instead.
+ */
 export function startScheduler(cfg: EngineConfig): () => void {
   let stopped = false;
   const tick = () => {

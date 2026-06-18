@@ -88,7 +88,9 @@ install -m 0755 "$INSTALL_DIR/scripts/office-say.sh" "$HOME/.local/bin/office-sa
 # ---- 3. tenant skeleton -----------------------------------------------------
 say "Preparing tenant root: $TENANT_ROOT"
 mkdir -p "$TENANT_ROOT"/{store,agents,secrets/slack,scheduled-tasks,skills,config}
-chmod 700 "$TENANT_ROOT/secrets"
+# store holds the db + the dashboard token + the vault key; secrets holds the Slack tokens. The files
+# inside are 0600, but tighten the dirs too so they aren't even traversable by another local user.
+chmod 700 "$TENANT_ROOT/secrets" "$TENANT_ROOT/store"
 if [ ! -f "$TENANT_ROOT/config/overrides.json" ]; then
   if [ -f "$INSTALL_DIR/tenant/config/overrides.example.json" ]; then
     cp "$INSTALL_DIR/tenant/config/overrides.example.json" "$TENANT_ROOT/config/overrides.json"

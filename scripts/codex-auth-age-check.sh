@@ -17,9 +17,13 @@
 #   bash scripts/codex-auth-age-check.sh --dry-run  # check + PRINT only, never posts
 set -uo pipefail
 
-API="http://127.0.0.1:3430/api/messages"
-TOKEN_PATH="/opt/claude/theoffice/tenant/store/.dashboard-token"
-AGENTS_DIR="/opt/claude/theoffice/tenant/agents"
+# Resolve paths from THIS script's location (vö. new-agent.sh) — never hardcode an absolute install path,
+# which silently iterates an empty dir (never URGENT) + skips the bus alert on the wrong box.
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TENANT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
+API="http://127.0.0.1:${OFFICE_PORT:-3430}/api/messages"
+TOKEN_PATH="$TENANT/store/.dashboard-token"
+AGENTS_DIR="$TENANT/agents"
 AUTH="${HOME}/.codex/auth.json"
 CODEX="${CODEX:-${HOME}/.local/bin/codex}"; command -v "$CODEX" >/dev/null 2>&1 || CODEX="$(command -v codex || echo codex)"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1

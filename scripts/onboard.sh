@@ -113,7 +113,7 @@ sleep 2
 b "  Now open Slack, find $NAME (under Apps), and send any message (e.g. 'hi')."
 echo "  I'll capture your Slack id so $NAME only answers YOU. Waiting (up to 3 min)..."
 OWNER=""
-for i in $(seq 1 90); do
+for _ in $(seq 1 90); do
   OWNER="$(sqlite3 "$DB" "SELECT reply_user FROM inbound_queue WHERE agent_id='$ID' AND source='channel' AND reply_user IS NOT NULL ORDER BY id DESC LIMIT 1;" 2>/dev/null || true)"
   [ -n "$OWNER" ] && break
   sleep 2

@@ -1,8 +1,25 @@
 import { execFileSync } from "node:child_process";
-import { REPO_ROOT } from "../config.js";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { REPO_ROOT, loadConfig } from "../config.js";
+import { getDb } from "../db/index.js";
 import { log } from "../logger.js";
 
 const logger = log("update");
+
+/** Best-effort clean SQLite snapshot before an update (VACUUM INTO includes WAL, unlike a raw file copy). */
+function backupDb(): void {
+  try {
+    const dbFile = loadConfig().paths.dbFile;
+    if (!existsSync(dbFile)) return;
+    const dst = `${dbFile}.pre-update.bak`;
+    if (existsSync(dst)) rmSync(dst);
+    getDb().exec(`VACUUM INTO '${dst.replace(/'/g, "''")}'`);
+    logger.info({ dst }, "pre-update db backup written");
+  } catch (e) {
+    logger.warn({ e }, "pre-update db backup failed (continuing with update)");
+  }
+}
 
 function git(args: string[]): string {
   return execFileSync("git", ["-C", REPO_ROOT, ...args], { encoding: "utf8" });
@@ -87,10 +104,38 @@ export function applyUpdate(opts?: { discardLocal?: boolean }): {
     step("git", ["stash", "push", "-m", "office-update: auto-stash before pull"]);
   }
 
-  step("git", ["pull", "--ff-only", "origin", "main"]);
-  step("npm", ["install", "--no-audit", "--no-fund"]);
-  step("npm", ["run", "build"]);
-  // restart shortly after we've returned the response
+  // Capture the exact pre-pull commit so a failed build can roll the source tree back to a known-good state
+  // (otherwise a build-break mid-update leaves source/dist mismatched until someone fixes it by hand).
+  let head = "";
+  try {
+    head = git(["rev-parse", "HEAD"]).trim();
+  } catch {
+    /* first run / detached — rollback simply skipped */
+  }
+  backupDb(); // clean snapshot before we touch anything, so a bad update never risks the tenant DB
+
+  try {
+    step("git", ["pull", "--ff-only", "origin", "main"]);
+    // `npm ci` (not install) for a reproducible build straight from the committed lockfile — no drift.
+    step("npm", ["ci", "--include=dev", "--no-audit", "--no-fund"]);
+    step("npm", ["run", "build"]);
+    // Re-install the office-say helper: agents call it to reply, and an upstream change to office-say.sh
+    // would otherwise never reach ~/.local/bin (they'd keep calling the stale copy). -D creates the dir.
+    const home = process.env.HOME ?? "";
+    step("install", ["-D", "-m", "0755", join(REPO_ROOT, "scripts", "office-say.sh"), join(home, ".local", "bin", "office-say")]);
+  } catch (e) {
+    if (head) {
+      try {
+        out.push(execFileSync("git", ["-C", REPO_ROOT, "reset", "--hard", head], { encoding: "utf8" }).trim());
+        logger.warn({ head }, "update failed -> rolled source back to pre-pull HEAD");
+      } catch (re) {
+        logger.error({ re }, "rollback failed");
+      }
+    }
+    throw e;
+  }
+
+  // restart shortly after we've returned the response (success branch only)
   setTimeout(() => {
     try {
       execFileSync("systemctl", ["--user", "restart", "theoffice.service"]);

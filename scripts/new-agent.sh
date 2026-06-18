@@ -14,7 +14,6 @@ ID="$(printf '%s' "$ID" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')"
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TENANT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
 PORT="$(node -e "try{process.stdout.write(String(require('$TENANT/config/overrides.json').web.port||3430))}catch{process.stdout.write('3430')}" 2>/dev/null || echo 3430)"
-SOCKET="$(node -e "try{process.stdout.write(String(require('$TENANT/config/overrides.json').tmux.socket||'theoffice'))}catch{process.stdout.write('theoffice')}" 2>/dev/null || echo theoffice)"
 
 dst="$TENANT/agents/$ID"
 if [ -e "$dst/CLAUDE.md" ]; then echo "agent '$ID' already exists at $dst" >&2; exit 1; fi
