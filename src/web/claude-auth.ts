@@ -1,8 +1,10 @@
 // Claude sign-in, from the dashboard — no terminal required.
 //
 // WHY THIS EXISTS (incident 2026-07-25): the Claude OAuth credential expired and every agent in the
-// fleet went silent at once. Each pane sat at `Not logged in · Run /login` — alive, but unable to make
-// a single API call. Two things made that outage far worse than it needed to be:
+// fleet went silent at once. Each pane sat on the signed-out banner (the rendered line SIGNED_OUT_RX
+// below matches) — alive, but unable to make a single API call. Writing that banner out verbatim here
+// would make this file arm every pane that reads it, which is the bug fixed on 2026-07-26; don't.
+// Two things made that outage far worse than it needed to be:
 //
 //   1. NOTHING DETECTED IT. /api/agents happily reported `running=true state=idle` for all 10 agents,
 //      because the health check only proves a process is alive in the pane — it never tests whether
@@ -58,13 +60,33 @@ export const CREDENTIALS_FILE = join(homedir(), ".claude", ".credentials.json");
  */
 const REFRESH_WARN_SEC = 3 * 86400;
 
-/** Substrings Claude Code prints in a pane when it cannot authenticate. */
-const SIGNED_OUT_MARKERS = [
-  "Not logged in",
-  "Login expired",
-  "Invalid authentication credentials",
-  "Please run /login",
-];
+/**
+ * The line Claude Code renders when the session cannot authenticate: a state and the action that
+ * fixes it, joined by a middle dot — `<state> · [Please ]run /login`, measured on a pane driven into
+ * a real auth failure (v2.1.220) and cross-checked against the string table in the CLI binary.
+ *
+ * Matching the WHOLE rendered line rather than the bare state is what keeps this from firing on an
+ * agent that merely TALKS about being signed out: reviewing this file, quoting an API error, or
+ * relaying the outage over the bus all print the state words, but never with this separator. The
+ * old bare-substring form did fire on all three, and the watchdog then killed the live pane that
+ * was investigating the incident.
+ *
+ * Two deliberate exclusions:
+ *   - "Invalid authentication credentials" is gone. It is nowhere in the CLI binary, so it can only
+ *     ever reach a pane as quoted API-error text — a pure false-positive source with no detection
+ *     value of its own.
+ *   - "Credit balance is too low" and "Invalid API key" are real CLI states but a restart does not
+ *     fix them, so they must not feed restartWouldFix.
+ *
+ * Assembled from parts on purpose: this file then never contains the rendered line itself, so
+ * reading it — or grepping it — cannot arm the reader's own pane.
+ */
+const SIGNED_OUT_STATES = ["Not logged in", "Login expired", "OAuth token revoked"];
+/** The 2026-07-25 outage rendered "Run /login"; v2.1.220 renders "Please run /login". */
+const SIGNED_OUT_ACTION = "(?:Please[ \\t]+)?[Rr]un /login";
+// Horizontal whitespace only — \s would swallow a newline and make two ordinary prose lines that
+// merely end and begin with the right words read as one rendered banner.
+const SIGNED_OUT_RX = new RegExp(`(?:${SIGNED_OUT_STATES.join("|")})[ \\t]*·[ \\t]*${SIGNED_OUT_ACTION}`);
 
 export interface CredentialState {
   present: boolean;
@@ -126,6 +148,33 @@ export function restartTargets(states: AgentAuthState[]): { restart: string[]; s
     else restart.push(s.id);
   }
   return { restart, skippedBusy };
+}
+
+/**
+ * Advance the "how many ticks in a row has this agent been left alone?" counter.
+ *
+ * Per agent, never per candidate set: a set-wide counter is reset by ANY change to the set, so one
+ * agent flapping in and out of the signed-out list would keep resetting it and the agent that is
+ * genuinely stuck would never reach the threshold — silencing exactly the noisy case that most
+ * needs a human. An agent that drops out of `skippedBusy` simply loses its key, which is the
+ * "it recovered, forget it" behaviour for free.
+ *
+ * Clock-free so the escalation rule is testable without mocking time; the repeat interval lives in
+ * the watchdog's existing re-alert window instead.
+ */
+export function trackBusySkips(
+  skippedBusy: string[],
+  previous: Map<string, number>,
+  threshold: number,
+): { next: Map<string, number>; escalate: string[] } {
+  const next = new Map<string, number>();
+  const escalate: string[] = [];
+  for (const id of skippedBusy) {
+    const n = (previous.get(id) ?? 0) + 1;
+    next.set(id, n);
+    if (n >= threshold) escalate.push(id);
+  }
+  return { next, escalate };
 }
 
 export interface AuthHealth {
@@ -196,9 +245,15 @@ export function readCredentialState(file: string = CREDENTIALS_FILE): Credential
   }
 }
 
-/** True when a captured pane is showing a "you are signed out" banner. */
+/**
+ * True when a captured pane is showing a "you are signed out" banner.
+ *
+ * Callers MUST capture with `join: true` — tmux wraps the banner on a narrow pane, and the joined
+ * capture is what puts it back on one line. Never normalise across real newlines: two separate
+ * lines that only form the banner once concatenated are prose, not a banner.
+ */
 export function paneLooksSignedOut(pane: string): boolean {
-  return SIGNED_OUT_MARKERS.some((m) => pane.includes(m));
+  return SIGNED_OUT_RX.test(pane);
 }
 
 /**

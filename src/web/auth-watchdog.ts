@@ -16,7 +16,7 @@
 
 import type { EngineConfig } from "../types.js";
 import { enqueueOutbound } from "../queue/index.js";
-import { getAuthHealth, restartSignedOutAgents, formatDuration } from "./claude-auth.js";
+import { getAuthHealth, restartSignedOutAgents, trackBusySkips, formatDuration } from "./claude-auth.js";
 import { log } from "../logger.js";
 
 const logger = log("auth-watchdog");
@@ -31,12 +31,22 @@ const REALERT_MS_URGENT = 60 * 60 * 1000;
 const REALERT_MS_EXPIRING = 24 * 60 * 60 * 1000;
 /** Self-heal is capped so a genuinely broken agent can't be restart-looped forever. */
 const HEAL_COOLDOWN_MS = 10 * 60 * 1000;
+/** Consecutive ticks an agent may be skipped as busy before the owner hears about it (6 = 30 min). */
+const BUSY_ESCALATE_TICKS = 6;
+/**
+ * Re-alert key for "signed out but mid-task", kept LOCAL to the watchdog on purpose. Promoting it
+ * into getAuthHealth would change the /api/auth/health contract and make the dashboard banner draw
+ * its "agents need a restart" variant for a case where a restart is exactly what we refuse to do.
+ */
+const BUSY_ALERT_STATUS = "agents-signed-out-busy";
 
 export function startAuthWatchdog(cfg: EngineConfig): () => void {
   let stopped = false;
   let lastAlertStatus = "";
   let lastAlertAt = 0;
   let lastHealAt = 0;
+  /** agent id -> consecutive ticks it was signed out AND mid-task, so the watchdog left it alone. */
+  let busySkips = new Map<string, number>();
 
   const alert = (text: string) => {
     const channel = cfg.owner.slackUserId;
@@ -65,6 +75,7 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
       // Recovered — allow the next incident to alert immediately.
       if (lastAlertStatus) logger.info("auth healthy again");
       lastAlertStatus = "";
+      busySkips = new Map();
       return;
     }
 
@@ -74,12 +85,37 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
     if (health.restartWouldFix && now - lastHealAt > HEAL_COOLDOWN_MS) {
       logger.warn({ count: health.signedOutCount }, "auth-watchdog: credential valid but panes signed out — self-healing");
       const r = restartSignedOutAgents(cfg);
+      const track = trackBusySkips(r.skippedBusy, busySkips, BUSY_ESCALATE_TICKS);
+      busySkips = track.next;
 
       // Every candidate was mid-turn, so nothing was touched. Don't burn the cooldown on a no-op
       // and don't page the owner about work that didn't happen: just look again on the next tick,
       // by which point the pane has almost certainly gone idle on its own.
       if (r.restarted.length === 0 && r.failed.length === 0 && r.skippedBusy.length > 0) {
-        logger.info({ skippedBusy: r.skippedBusy }, "auth-watchdog: all candidates busy — deferring to next tick");
+        if (track.escalate.length === 0) {
+          logger.info({ skippedBusy: r.skippedBusy }, "auth-watchdog: all candidates busy — deferring to next tick");
+          return;
+        }
+
+        // Deferring forever is its own outage. lastHealAt is deliberately NOT touched on this path,
+        // so the gate above stays open and every later tick lands here too — without this exit the
+        // alert below would be unreachable for as long as the pane stays busy, and the fleet could
+        // sit half-dead in silence. The counter is NOT reset afterwards: the re-alert window is the
+        // one and only repeat interval, so a still-stuck agent produces one reminder an hour.
+        const shouldAlert = lastAlertStatus !== BUSY_ALERT_STATUS || now - lastAlertAt > REALERT_MS;
+        if (!shouldAlert) return;
+        lastAlertStatus = BUSY_ALERT_STATUS;
+        lastAlertAt = now;
+        // Its own text, never health.message: that one ends with "restarting them picks the login
+        // up", which is precisely the action the busy guard is refusing to take.
+        alert(
+          `⏳ ${track.escalate.join(", ")} has looked signed out for over ` +
+            `${formatDuration((BUSY_ESCALATE_TICKS * CHECK_MS) / 1000)}, but has been mid-task the whole time, ` +
+            `so I have NOT touched it — restarting an agent mid-turn destroys the conversation it is having.\n` +
+            `The Claude login itself is valid. Have a look when you can: it is either genuinely working, ` +
+            `or its pane is wedged and needs you.`,
+        );
+        logger.error({ status: BUSY_ALERT_STATUS, agents: track.escalate }, "auth-watchdog: alerted owner");
         return;
       }
 
