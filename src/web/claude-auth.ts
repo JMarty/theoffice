@@ -27,6 +27,7 @@ import type { EngineConfig } from "../types.js";
 import { loadAgents } from "../agents.js";
 import { capturePane, hasSession, killSession, newSession, sendKey, sendText, sessionNameFor } from "../session/tmux.js";
 import { launchAgent } from "../session/session-manager.js";
+import { detectPaneState } from "../session/pane-state.js";
 import { log } from "../logger.js";
 
 const logger = log("claude-auth");
@@ -93,6 +94,38 @@ export interface AgentAuthState {
   signedOut: boolean;
   /** no tmux session at all (can't tell, and it isn't running anyway) */
   noSession: boolean;
+  /** pane is mid-turn (anything but a clean idle prompt) — never safe to kill */
+  busy: boolean;
+}
+
+/**
+ * True unless the pane is positively a clean, idle prompt.
+ *
+ * Deliberately conservative: a wrong "busy" costs one 5-minute tick, a wrong "idle" costs a live
+ * conversation. "unknown" — a pane we cannot classify — therefore counts as busy.
+ */
+export function paneIsBusy(pane: string): boolean {
+  return detectPaneState(pane) !== "idle";
+}
+
+/**
+ * Split scanned agents into the ones the watchdog may restart and the ones it must leave alone.
+ *
+ * A busy pane is doing real work for someone, and the signed-out signal is a plain text match on
+ * the pane, so an agent that merely PRINTS a marker (reviewing the auth code, quoting an API
+ * error) reads as signed out. Killing it would destroy a live conversation to "fix" a session
+ * that was never broken. A genuinely signed-out pane sits idle, so it is picked up on a later
+ * tick anyway — waiting costs nothing, killing costs the turn.
+ */
+export function restartTargets(states: AgentAuthState[]): { restart: string[]; skippedBusy: string[] } {
+  const restart: string[] = [];
+  const skippedBusy: string[] = [];
+  for (const s of states) {
+    if (!s.signedOut && !s.noSession) continue;
+    if (s.busy) skippedBusy.push(s.id);
+    else restart.push(s.id);
+  }
+  return { restart, skippedBusy };
 }
 
 export interface AuthHealth {
@@ -179,18 +212,22 @@ export function scanAgentAuth(cfg: EngineConfig): AgentAuthState[] {
     if (runtime !== "claude") continue;
     const session = sessionNameFor(a.id);
     if (!hasSession(cfg.tmux.socket, session)) {
-      out.push({ id: a.id, displayName: a.displayName, runtime, signedOut: false, noSession: true });
+      out.push({ id: a.id, displayName: a.displayName, runtime, signedOut: false, noSession: true, busy: false });
       continue;
     }
     // The banner sits on the status line but can scroll; read a little history so a busy pane
     // that has since printed output doesn't read as healthy.
     const pane = capturePane(cfg.tmux.socket, session, { join: true, start: -40 }) ?? "";
+    // Liveness is a property of the CURRENT screen, so it gets its own capture: the scrollback
+    // above is history and would classify a long-finished turn as still running.
+    const screen = capturePane(cfg.tmux.socket, session) ?? "";
     out.push({
       id: a.id,
       displayName: a.displayName,
       runtime,
       signedOut: paneLooksSignedOut(pane),
       noSession: false,
+      busy: paneIsBusy(screen),
     });
   }
   return out;
@@ -464,16 +501,19 @@ export function cancelLogin(cfg: EngineConfig): void {
 
 /**
  * Relaunch panes so they re-read the credential. `all` restarts every enabled Claude agent; otherwise
- * only the ones currently showing a signed-out banner (or missing a session) are touched, so a healthy
- * agent mid-task is never interrupted for nothing.
+ * only the ones currently showing a signed-out banner (or missing a session) are touched, and never
+ * one that is mid-turn — see restartTargets for why a busy pane is left alone.
+ *
+ * `all` is the owner pressing the button by hand, so it overrides the busy guard: an explicit
+ * request is a decision, not a heuristic.
  */
-export function restartSignedOutAgents(cfg: EngineConfig, opts: { all?: boolean } = {}): { restarted: string[]; failed: string[] } {
+export function restartSignedOutAgents(
+  cfg: EngineConfig,
+  opts: { all?: boolean } = {},
+): { restarted: string[]; failed: string[]; skippedBusy: string[] } {
   const states = scanAgentAuth(cfg);
-  const wanted = new Set(
-    opts.all === true
-      ? states.map((s) => s.id)
-      : states.filter((s) => s.signedOut || s.noSession).map((s) => s.id),
-  );
+  const targets = opts.all === true ? { restart: states.map((s) => s.id), skippedBusy: [] } : restartTargets(states);
+  const wanted = new Set(targets.restart);
 
   const restarted: string[] = [];
   const failed: string[] = [];
@@ -487,6 +527,6 @@ export function restartSignedOutAgents(cfg: EngineConfig, opts: { all?: boolean 
       failed.push(agent.id);
     }
   }
-  logger.warn({ restarted, failed }, "auth-restart complete");
-  return { restarted, failed };
+  logger.warn({ restarted, failed, skippedBusy: targets.skippedBusy }, "auth-restart complete");
+  return { restarted, failed, skippedBusy: targets.skippedBusy };
 }

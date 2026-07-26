@@ -2,7 +2,15 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readCredentialState, paneLooksSignedOut, extractOAuthUrl, formatDuration } from "./claude-auth.js";
+import {
+  readCredentialState,
+  paneLooksSignedOut,
+  extractOAuthUrl,
+  formatDuration,
+  restartTargets,
+  paneIsBusy,
+  type AgentAuthState,
+} from "./claude-auth.js";
 
 const tmps: string[] = [];
 function credFile(body: unknown): string {
@@ -139,5 +147,49 @@ describe("formatDuration", () => {
     expect(formatDuration(600)).toBe("10 min");
     expect(formatDuration(7200)).toBe("2.0 h");
     expect(formatDuration(4 * 86400)).toBe("4 d");
+  });
+});
+
+describe("restartTargets", () => {
+  const state = (over: Partial<AgentAuthState>): AgentAuthState => ({
+    id: "a",
+    displayName: "A",
+    runtime: "claude",
+    signedOut: false,
+    noSession: false,
+    busy: false,
+    ...over,
+  });
+
+  // The whole point of the guard: a pane mid-turn is doing real work for someone. Killing it
+  // destroys that conversation, and the banner match that triggered it is usually the agent
+  // merely PRINTING a marker (reviewing this file, quoting an API error) rather than signed out.
+  it("never restarts a signed-out agent whose pane is busy", () => {
+    const r = restartTargets([state({ id: "zeus", signedOut: true, busy: true })]);
+    expect(r.restart).toEqual([]);
+    expect(r.skippedBusy).toEqual(["zeus"]);
+  });
+});
+
+describe("paneIsBusy", () => {
+  const SEP = "─".repeat(40);
+  const FOOTER = "  bypass permissions on (shift+tab to cycle)";
+  const idle = ["assistant reply text", SEP, "❯ ", SEP, FOOTER].join("\n");
+  const working = ["✻ Working… (3s · ↓ 0.1k tokens · esc to interrupt)", SEP, "❯ ", SEP, FOOTER].join("\n");
+
+  it("treats a clean idle prompt as not busy", () => {
+    expect(paneIsBusy(idle)).toBe(false);
+  });
+
+  it("treats a mid-turn pane as busy", () => {
+    expect(paneIsBusy(working)).toBe(true);
+  });
+
+  // Conservative on purpose: the cost of a wrong "busy" is a 5-minute wait for the next tick,
+  // the cost of a wrong "idle" is a killed conversation. Anything we cannot positively classify
+  // as a clean idle prompt must count as busy.
+  it("treats an unclassifiable pane as busy rather than guessing it is safe to kill", () => {
+    expect(paneIsBusy("garbled output with no footer")).toBe(true);
+    expect(paneIsBusy("")).toBe(true);
   });
 });

@@ -72,12 +72,22 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
 
     // --- self-heal: credential good, panes stale. No human needed. ---
     if (health.restartWouldFix && now - lastHealAt > HEAL_COOLDOWN_MS) {
-      lastHealAt = now;
       logger.warn({ count: health.signedOutCount }, "auth-watchdog: credential valid but panes signed out — self-healing");
       const r = restartSignedOutAgents(cfg);
+
+      // Every candidate was mid-turn, so nothing was touched. Don't burn the cooldown on a no-op
+      // and don't page the owner about work that didn't happen: just look again on the next tick,
+      // by which point the pane has almost certainly gone idle on its own.
+      if (r.restarted.length === 0 && r.failed.length === 0 && r.skippedBusy.length > 0) {
+        logger.info({ skippedBusy: r.skippedBusy }, "auth-watchdog: all candidates busy — deferring to next tick");
+        return;
+      }
+
+      lastHealAt = now;
       alert(
         `🔧 Auto-repair: ${r.restarted.length} agent(s) were still signed out even though the Claude login is valid. ` +
           `I restarted them (${r.restarted.join(", ") || "none"}). No action needed from you.` +
+          (r.skippedBusy.length ? `\n⏳ Left alone because they were mid-task: ${r.skippedBusy.join(", ")}` : "") +
           (r.failed.length ? `\n⚠️ Could NOT restart: ${r.failed.join(", ")}` : ""),
       );
       return;

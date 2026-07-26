@@ -449,7 +449,10 @@ async function handleApi(
     try {
       const r = await submitCode(cfg, String(b.code ?? ""));
       if (!r.ok) return json(res, 200, r);
-      const restarted = b.restart === false ? { restarted: [], failed: [] } : restartSignedOutAgents(cfg, { all: true });
+      const restarted =
+        b.restart === false
+          ? { restarted: [], failed: [], skippedBusy: [] }
+          : restartSignedOutAgents(cfg, { all: true });
       return json(res, 200, { ...r, ...restarted });
     } catch (e) {
       logger.error({ err: e }, "login code failed");
