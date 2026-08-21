@@ -24,11 +24,44 @@ const logger = log("auth-watchdog");
 const CHECK_MS = 5 * 60 * 1000;
 /** Re-alert cadence, per severity. Hard-down states (expired / no-credential / panes signed out)
  *  page HOURLY until fixed — the fleet is mute, the owner needs nagging. But the non-urgent
- *  "expiring-soon" heads-up (nothing is broken, days of runway) re-alerts at most ONCE A DAY so it
- *  can never become the hourly spam that went out 2:57/3:57/4:57… A status change still alerts
- *  immediately, so a degrade from expiring-soon → hard-down pages at once regardless of this window. */
+ *  "expiring-soon" heads-up (nothing is broken, days of runway) must never become hourly spam;
+ *  it repeats only inside the fixed local windows below. A status change still alerts immediately,
+ *  so a degrade from expiring-soon → hard-down pages at once regardless of either window. */
 const REALERT_MS_URGENT = 60 * 60 * 1000;
-const REALERT_MS_EXPIRING = 24 * 60 * 60 * 1000;
+
+/**
+ * Repeat reminders about the SAME unchanged expiring-soon warning are capped at two a day, in these
+ * local hours. The owner asked for this on 2026-08-21, after an hourly repeat sent 14 identical DMs
+ * in 13 hours, overnight included: an alert that arrives every hour stops being information and just
+ * burns attention. Fixed LOCAL hours, not a 24h timer from the last send — a relative timer drifts
+ * (2:57 → 2:57 the next night) and lands back in the small hours, which was the original complaint.
+ * Note this caps REPEATS only — see dueForAlert.
+ */
+export const ALERT_HOURS: readonly number[] = [8, 20];
+
+/** Identifies one reminder window, e.g. "2026-08-21:8". null outside the windows. */
+export function alertSlot(now: Date): string | null {
+  const h = now.getHours();
+  if (!ALERT_HOURS.includes(h)) return null;
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${m}-${d}:${h}`;
+}
+
+/**
+ * A problem we have NOT reported yet is told immediately — a credential that just died must not wait
+ * until the evening window. Anything we have already said repeats only inside a window, once per
+ * window, which is what makes it two a day instead of twenty-four.
+ */
+export function dueForAlert(a: {
+  status: string;
+  lastStatus: string;
+  slot: string | null;
+  lastSlot: string;
+}): boolean {
+  if (a.status !== a.lastStatus) return true;
+  return a.slot !== null && a.slot !== a.lastSlot;
+}
 /** Self-heal is capped so a genuinely broken agent can't be restart-looped forever. */
 const HEAL_COOLDOWN_MS = 10 * 60 * 1000;
 /** Consecutive ticks an agent may be skipped as busy before the owner hears about it (6 = 30 min). */
@@ -44,6 +77,8 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
   let stopped = false;
   let lastAlertStatus = "";
   let lastAlertAt = 0;
+  /** Reminder window whose one allowed repeat has already been sent. */
+  let lastAlertSlot = "";
   let lastHealAt = 0;
   /** agent id -> consecutive ticks it was signed out AND mid-task, so the watchdog left it alone. */
   let busySkips = new Map<string, number>();
@@ -75,6 +110,7 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
       // Recovered — allow the next incident to alert immediately.
       if (lastAlertStatus) logger.info("auth healthy again");
       lastAlertStatus = "";
+      lastAlertSlot = "";
       busySkips = new Map();
       return;
     }
@@ -102,7 +138,7 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
         // alert below would be unreachable for as long as the pane stays busy, and the fleet could
         // sit half-dead in silence. The counter is NOT reset afterwards: the re-alert window is the
         // one and only repeat interval, so a still-stuck agent produces one reminder an hour.
-        const shouldAlert = lastAlertStatus !== BUSY_ALERT_STATUS || now - lastAlertAt > REALERT_MS;
+        const shouldAlert = lastAlertStatus !== BUSY_ALERT_STATUS || now - lastAlertAt > REALERT_MS_URGENT;
         if (!shouldAlert) return;
         lastAlertStatus = BUSY_ALERT_STATUS;
         lastAlertAt = now;
@@ -130,11 +166,19 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
     }
 
     // --- alert: needs the owner to actually sign in ---
-    const realertMs = health.status === "expiring-soon" ? REALERT_MS_EXPIRING : REALERT_MS_URGENT;
-    const shouldAlert = health.status !== lastAlertStatus || now - lastAlertAt > realertMs;
-    if (!shouldAlert) return;
+    // Severity decides the REPEAT cadence; a status change alerts immediately on either path.
+    // hard-down (expired / no-credential / signed-out panes): hourly until someone acts — the fleet
+    // is mute, so nagging is the point. expiring-soon: nothing is broken and there are days of
+    // runway, so it repeats only inside ALERT_HOURS, twice a day, never overnight.
+    const slot = alertSlot(new Date(now));
+    const expiring = health.status === "expiring-soon";
+    const due = expiring
+      ? dueForAlert({ status: health.status, lastStatus: lastAlertStatus, slot, lastSlot: lastAlertSlot })
+      : health.status !== lastAlertStatus || now - lastAlertAt > REALERT_MS_URGENT;
+    if (!due) return;
     lastAlertStatus = health.status;
     lastAlertAt = now;
+    if (expiring && slot) lastAlertSlot = slot;
 
     if (health.status === "expiring-soon") {
       alert(
