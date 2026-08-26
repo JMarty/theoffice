@@ -62,6 +62,33 @@ export function dueForAlert(a: {
   if (a.status !== a.lastStatus) return true;
   return a.slot !== null && a.slot !== a.lastSlot;
 }
+
+/**
+ * Which repeat cadence applies, decided by severity. This is the seam where the two independent
+ * 2026-08-21 fixes meet, so it is a named function rather than an inline ternary: the choice itself
+ * is the thing that needs testing, and an expression buried in the tick loop cannot be tested.
+ *
+ * hard-down (expired / no-credential / signed-out panes): the fleet is mute and nobody is working,
+ * so it repeats HOURLY until someone acts — the windows must not silence it, not even at 03:00.
+ * expiring-soon: nothing is broken and there are days of runway, so it repeats only inside
+ * ALERT_HOURS. A relative 24h timer was the alternative and it drifts: alert at 02:57 and the next
+ * one lands at 02:57 again, which is the overnight spam the owner asked us to stop.
+ * Either way an UNREPORTED status change is told at once — see dueForAlert for that half.
+ */
+export function dueForSeverity(a: {
+  status: string;
+  lastStatus: string;
+  slot: string | null;
+  lastSlot: string;
+  now: number;
+  lastAlertAt: number;
+  urgentMs: number;
+}): boolean {
+  if (a.status === "expiring-soon") {
+    return dueForAlert({ status: a.status, lastStatus: a.lastStatus, slot: a.slot, lastSlot: a.lastSlot });
+  }
+  return a.status !== a.lastStatus || a.now - a.lastAlertAt > a.urgentMs;
+}
 /** Self-heal is capped so a genuinely broken agent can't be restart-looped forever. */
 const HEAL_COOLDOWN_MS = 10 * 60 * 1000;
 /** Consecutive ticks an agent may be skipped as busy before the owner hears about it (6 = 30 min). */
@@ -172,9 +199,15 @@ export function startAuthWatchdog(cfg: EngineConfig): () => void {
     // runway, so it repeats only inside ALERT_HOURS, twice a day, never overnight.
     const slot = alertSlot(new Date(now));
     const expiring = health.status === "expiring-soon";
-    const due = expiring
-      ? dueForAlert({ status: health.status, lastStatus: lastAlertStatus, slot, lastSlot: lastAlertSlot })
-      : health.status !== lastAlertStatus || now - lastAlertAt > REALERT_MS_URGENT;
+    const due = dueForSeverity({
+      status: health.status,
+      lastStatus: lastAlertStatus,
+      slot,
+      lastSlot: lastAlertSlot,
+      now,
+      lastAlertAt,
+      urgentMs: REALERT_MS_URGENT,
+    });
     if (!due) return;
     lastAlertStatus = health.status;
     lastAlertAt = now;
