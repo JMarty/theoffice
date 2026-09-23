@@ -1,0 +1,12 @@
+{
+  "description": "Restricted profile for the office's specialist agents (example: two specialist agents). KEEPS what their work needs: Gmail (read, label, draft), Google Drive, Google Calendar, and the legal databases (example: a legal-database agent). DENIES every connector that could reach outward or rewrite the owner's infrastructure: n8n (workflow run/publish), Canva (publish), the Slack account connector (posting anywhere in the workspace), LegalZoom, WorkOS, Fireflies, Economic Index. On top of that the engine automatically withholds the owner's raw data: the raw database and the vault key. WARNING: this list is NOT automatic. A new connector added to the account is ALLOWED by default until it is added here. Assign via agent.json \"profile\":\"office-restricted\".",
+  "deny": [
+    "mcp__claude_ai_n8n__*",
+    "mcp__claude_ai_Canva__*",
+    "mcp__claude_ai_Slack__*",
+    "mcp__claude_ai_LegalZoom__*",
+    "mcp__claude_ai_WorkOS__*",
+    "mcp__claude_ai_Fireflies__*",
+    "mcp__claude_ai_Anthropic_Economic_Index__*"
+  ]
+}

@@ -5,6 +5,96 @@ dashboard ⟳ Update button), skim the entries newer than your previous version.
 
 ---
 
+## Per-agent effort + live model switching, refreshed model registries (2026-07-26)
+
+Agents can now pin a **thinking effort** as well as a model, and changing either no longer restarts
+the agent — see [`docs/MODEL-AND-EFFORT.md`](docs/MODEL-AND-EFFORT.md).
+
+**Action required if you run a `gemini` agent.** The Gemini model list was in the wrong *format*: it
+carried human labels (`"Gemini 3.1 Pro (High)"`) while `agy` advertises slugs
+(`gemini-3.1-pro-high`). An unrecognised name appears to fall back to the account default silently,
+so an agent could look configured while running on something else. Check each Gemini agent:
+
+```bash
+grep -h '"model"' tenant/agents/*/agent.json
+agy models        # the authoritative list for your account
+```
+
+If the value is not in `agy models`, replace it with the matching slug (dashboard dropdown, or edit
+`agent.json` and restart the agent). A guard test now keeps the registry slug-shaped.
+
+**No action required otherwise:**
+
+- The Claude model list gained Opus 5, Fable 5 and Sonnet 5, and the Haiku entry moved from the dated
+  snapshot id to the `claude-haiku-4-5` alias. Existing pins keep working — previous model names
+  remain usable via `--model`, which is how the engine launches agents.
+- `agent.json` gains an optional `effort` (`low`/`medium`/`high`/`xhigh`/`max`, Claude runtime only).
+  Unset = unchanged behaviour. An unknown value normalizes to unset rather than failing the launch.
+- A model change now applies to the **running** session instead of killing it, so agents keep their
+  context. Non-Claude runtimes keep the previous restart-to-apply behaviour.
+
+**Two optional follow-ups:**
+
+1. Teach existing agents to honour a plain-language request ("switch yourself to xhigh"):
+   ```bash
+   bash scripts/backfill-office-tune-doc.sh
+   ```
+   Idempotent; new agents get it from the template. `office-tune` itself is installed by
+   `scripts/install.sh` alongside `office-say`, or manually:
+   ```bash
+   install -m 0755 scripts/office-tune.sh "$HOME/.local/bin/office-tune"
+   ```
+2. If you use the interactive `claude` CLI yourself, record your own defaults so an agent's switch
+   cannot drift them (agents share `~/.claude/settings.json` with you). In tenant overrides:
+   ```json
+   { "owner": { "claudeModel": "claude-opus-5", "claudeEffort": "high" } }
+   ```
+   Unset defaults to restoring `effortLevel: "high"` and removing any `model` key.
+
+## Optional trusted-proxy gate for client-IP (2026-06-18)
+
+The dashboard rate limiter keys on the client IP from `X-Real-IP` / `X-Forwarded-For`. Those are only
+trustworthy when set by YOUR reverse proxy; a client hitting the port directly could forge them to dodge the
+limiter or frame another IP. Opt-in hardening: set a shared token so forwarding headers are only trusted from
+the proxy.
+
+1. Generate a token: `openssl rand -hex 32`
+2. Engine: set env `OFFICE_TRUSTED_PROXY_TOKEN=<token>` (or `web.trustedProxyToken` in tenant overrides).
+3. Proxy (Nginx Proxy Manager / nginx) — add to the location block:
+   ```nginx
+   proxy_set_header X-Proxy-Token <token>;
+   ```
+Requests without the matching token fall back to the real socket peer for rate-limiting. **Unset = unchanged
+behavior (backward compatible)** — existing setups keep working until you opt in.
+
+## Safer Update flow + DB schema migrations (2026-06-17)
+
+No action required — the one-click **Update** (dashboard ⟳ / `POST /api/update/apply`) is now safer:
+
+1. Captures a **rollback point** (`HEAD`) before pulling.
+2. Takes a **pre-update DB backup** — `VACUUM INTO theoffice.db.bak-<UTC-stamp>` (a clean, WAL-consistent
+   standalone snapshot). The update is **aborted** if the backup fails — we never run a schema-changing
+   update on the live DB without a recoverable snapshot. The last 5 backups are kept.
+3. Uses `npm ci` (reproducible from the lockfile) instead of `npm install`.
+4. Recopies `office-say` to `~/.local/bin/office-say` after build.
+5. **On any failure** the working tree is `git reset --hard` back to the rollback point (main is never left
+   half-updated) and the DB backup is preserved. **Restart happens only on success.**
+
+**Schema migrations:** `openDb()` now runs `user_version`-gated forward migrations after `SCHEMA_SQL`
+(`src/db/migrate.ts`). Each runs in its own transaction that also bumps `user_version`, so a failed
+migration rolls back atomically (DB unchanged). Existing DBs are adopted at the baseline automatically — no
+action needed. (Adding a future migration: see `src/db/MIGRATIONS.md`.)
+
+**Manual restore from a backup:**
+```bash
+systemctl --user stop theoffice.service
+cp tenant/store/theoffice.db.bak-<stamp> tenant/store/theoffice.db
+rm -f tenant/store/theoffice.db-wal tenant/store/theoffice.db-shm   # backup is standalone; stale sidecars are safe to drop
+systemctl --user start theoffice.service
+```
+
+---
+
 ## Dashboard Rate Limiting & Nginx (2026-06-15)
 
 The dashboard now enforces brute-force lockout rate limiting (401 errors) based on IP addresses.

@@ -1,7 +1,7 @@
 import type { EngineConfig, AgentDef } from "../types.js";
 import { log } from "../logger.js";
 import { hasSession, sessionNameFor } from "./tmux.js";
-import { listQueued } from "../queue/index.js";
+import { listQueued, markFailed } from "../queue/index.js";
 import { loadAgents } from "../agents.js";
 import { runtimeFor } from "./runtime.js";
 
@@ -48,22 +48,47 @@ export function launchEnabledAgents(cfg: EngineConfig): void {
 export function startDeliverer(cfg: EngineConfig): () => void {
   const socket = cfg.tmux.socket;
   let stopped = false;
+  let running = false; // reentrancy guard: a tick can outlast DELIVERER_TICK_MS (await rt.deliver)
 
   const tick = async () => {
     if (stopped) return;
+    // P0#4: if the previous tick is still in flight, skip this one. Without this, a slow tick lets the
+    // next interval fire concurrently and the same queued item is read+delivered twice (double-inject).
+    if (running) return;
+    running = true;
     try {
       const byId = new Map(loadAgents(cfg).map((a) => [a.id, a]));
+      // Never dead-letter against an EMPTY roster: an empty map means "can't tell" (a transient
+      // agentsDir read failure), and failing every queued message on that would be catastrophic. When
+      // the roster is unknown, fall back to the old leave-queued behaviour for unmatched ids.
+      const rosterKnown = byId.size > 0;
       for (const item of listQueued()) {
-        const session = sessionNameFor(item.agent_id);
-        if (!hasSession(socket, session)) continue; // agent not running -> leave queued
         const agent = byId.get(item.agent_id);
-        if (!agent) continue; // unknown agent (roster changed) -> leave queued
+        if (!agent) {
+          // The message is addressed to an id that is NOT a real agent — a misrouted bus message to an
+          // infra sender (drift-detector / oomwatch / owner-watchdog / michael / watchd / frozen-pane-
+          // alarm). It has no session and never will, so leaving it queued parks it FOREVER at a low id.
+          // listQueued's fleet-wide LIMIT window is id-ordered, so a pile of these permanently fills the
+          // window and starves every real agent: the 2026-08-24 fleet freeze was 51 such rows accumulated
+          // since Aug 4 pushing the window ceiling to id 15267 while the lowest real item was 15268 — every
+          // agent sat exactly one slot outside the window, attempts=0 all day. Dead-letter it so it leaves
+          // the queue; a genuinely misrouted OWNER (source='channel') message is still caught separately by
+          // the owner-delivery watchdog's state-observer.
+          if (!rosterKnown) continue; // roster unreadable this tick -> can't classify -> leave queued
+          markFailed(item.id, `no such agent in roster: '${item.agent_id}' (dead-lettered — an undeliverable non-agent row would clog the delivery window)`);
+          logger.warn({ id: item.id, agent: item.agent_id, source: item.source }, "dead-lettered inbound for a non-agent (kept the delivery window clear)");
+          continue;
+        }
+        const session = sessionNameFor(item.agent_id);
+        if (!hasSession(socket, session)) continue; // real agent, just not running -> leave queued for relaunch
         const rt = runtimeFor(agent);
         if (rt.isBusy(item.agent_id)) continue; // async turn in flight / usage back-off -> leave queued
         await rt.deliver(cfg, agent, item); // runtime owns readiness + queue bookkeeping
       }
     } catch (err) {
       logger.error({ err }, "deliverer tick error");
+    } finally {
+      running = false;
     }
   };
 
