@@ -67,4 +67,5 @@ OFFICE_TENANT_ROOT=./tenant npm run dev
 ```
 
 Config/env overrides are all `OFFICE_*` (e.g. `OFFICE_TENANT_ROOT`, `OFFICE_PORT`, `OFFICE_TMUX_SOCKET`,
-`OFFICE_EXTRA_PORTS`). MIT licensed.
+`OFFICE_EXTRA_PORTS`). `OFFICE_DASHBOARD=mc` (or `web.dashboard: "mc"`) makes `/` open Mission Control
+instead of the classic dashboard. MIT licensed.
