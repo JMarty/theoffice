@@ -25,3 +25,42 @@ export function isDueNow(expr: string, nowMs: number, tz: string): boolean {
 export function minuteKey(nowMs: number): number {
   return Math.floor(nowMs / 60000);
 }
+
+/**
+ * True if `expr` is a well-formed cron expression the scheduler can actually parse — the validator
+ * counterpart to isDueNow (which SILENTLY treats a bad expression as never-due). Reuses the same
+ * cron-parser, so "valid here" == "parseable by the live scheduler". Pure; no behaviour change to the
+ * runtime path. Used by the structural config lint (issue #21 §4a).
+ *
+ * Note: a 6-field (seconds) expression parses as valid, but the scheduler ticks per-MINUTE (isDueNow
+ * floors to the minute), so the seconds field is effectively ignored at runtime. Fine to accept; just
+ * don't rely on sub-minute precision.
+ */
+export function isValidCron(expr: unknown): boolean {
+  if (typeof expr !== "string" || !expr.trim()) return false;
+  try {
+    parser.parseExpression(expr);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The most recent scheduled occurrence STRICTLY BEFORE the minute containing `beforeMs`, returned as the
+ * ms epoch of that occurrence's minute — or null if none / a bad expression. Used by boot catch-up to find
+ * the latest occurrence that fell while the engine was asleep, without minute-by-minute scanning. IANA tz.
+ */
+export function lastOccurrenceBefore(expr: string, beforeMs: number, tz: string): number | null {
+  const beforeMin = Math.floor(beforeMs / 60000);
+  try {
+    const it = parser.parseExpression(expr, { currentDate: new Date(beforeMs), tz });
+    let prevMin = Math.floor(it.prev().toDate().getTime() / 60000);
+    // prev() at an exact minute boundary can return the boundary minute itself (inclusive); step once more
+    // so the result is STRICTLY before the current minute.
+    if (prevMin >= beforeMin) prevMin = Math.floor(it.prev().toDate().getTime() / 60000);
+    return prevMin < beforeMin ? prevMin * 60000 : null;
+  } catch {
+    return null;
+  }
+}

@@ -4,7 +4,7 @@ export type MemoryTier = "hot" | "warm" | "cold" | "shared";
 export type KanbanStatus = "planned" | "in_progress" | "waiting" | "done";
 export type Priority = "low" | "normal" | "high" | "urgent";
 export type MessageStatus = "pending" | "delivered" | "done" | "failed";
-export type QueueSource = "channel" | "scheduler" | "bus" | "manual";
+export type QueueSource = "channel" | "scheduler" | "bus" | "manual" | "system";
 export type QueueStatus = "queued" | "delivering" | "delivered" | "failed";
 export type ScheduledTaskType = "task" | "heartbeat";
 
@@ -15,6 +15,12 @@ export interface AgentDef {
   /** absolute path to this agent's working dir (where its `claude` runs) */
   dir: string;
   model?: string;
+  /**
+   * Claude "thinking effort" for this agent (low | medium | high | xhigh | max), passed as --effort at
+   * launch. Claude runtime only; ignored by codex/gemini. Unset = whatever the CLI defaults to.
+   * An unknown value normalizes away to unset (see session/effort.ts) so a typo can't block a launch.
+   */
+  effort?: string;
   enabled: boolean;
   /**
    * This agent's OWN Slack identity — a distinct bot the owner can DM directly
@@ -34,6 +40,20 @@ export interface AgentDef {
   allowFrom?: string[];
   /** security profile name (drives the connector deny-list); default = full access */
   profile?: string;
+  /**
+   * Run this agent under its OWN provider account instead of the owner's.
+   *
+   * Unset (default): the agent shares the owner's HOME, therefore the owner's Claude/ChatGPT login,
+   * connectors and rate limit. Set to true: the agent gets its own HOME (`<agent.dir>/home`, 0700) and
+   * must be signed in separately — after which its connectors see THAT account's mailbox and Drive,
+   * and its usage counts against THAT subscription.
+   *
+   * This is the switch that makes several subscriptions usable side by side, and it is also the
+   * isolation boundary between them: no agent may read another agent's home (enforced in
+   * session/profile.ts). Flipping it on an agent that is already signed in logs that agent out until
+   * someone signs in again under the new HOME — so migrate one agent at a time, deliberately.
+   */
+  ownAccount?: boolean;
   /**
    * Which terminal-agent runtime drives this agent — the provider id of a registered runtime
    * (see src/session/runtime.ts). "claude" (Claude Code, the default) and "codex" (OpenAI Codex CLI)
@@ -59,6 +79,21 @@ export interface EngineConfig {
   tmux: TmuxConfig;
   owner: OwnerConfig;
   channel: ChannelConfig;
+  /**
+   * Optional scoped OCR trigger (rental tenant portal). When set, a bot message in `channelId` carrying
+   * the matching `secret` (and a valid UUID) is the ONLY bot message accepted by the Slack ingest — routed
+   * as a data-only re-OCR wake to `agentId`. Unset = the feature is inert and the bot-drop is unchanged.
+   */
+  ocrSignal?: OcrSignalConfig;
+}
+
+export interface OcrSignalConfig {
+  /** the dedicated Slack channel id whose bot posts are treated as OCR triggers */
+  channelId: string;
+  /** shared secret that must be present in the signal payload (matches the poster's secret) */
+  secret: string;
+  /** the agent woken to run the OCR cross-check for the submission */
+  agentId: string;
 }
 
 export interface PathsConfig {
@@ -79,6 +114,12 @@ export interface PathsConfig {
 export interface WebConfig {
   host: string;
   port: number;
+  /**
+   * Optional shared secret the reverse proxy sends as `X-Proxy-Token`. When set, X-Real-IP/X-Forwarded-For
+   * are only trusted on requests carrying the matching token (#6 trusted-proxy gate) — stops a direct client
+   * spoofing its rate-limit IP. Unset = forwarding headers trusted as before (backward compatible).
+   */
+  trustedProxyToken?: string;
   rateLimit?: {
     maxFails: number;
     windowMs: number;
@@ -100,6 +141,15 @@ export interface OwnerConfig {
   slackUserId?: string;
   locale: string;
   timezone: string;
+  /**
+   * The owner's OWN interactive Claude CLI defaults. Agents share ~/.claude/settings.json with the
+   * owner (one HOME), and /model + /effort save themselves into it, so after tuning an agent the
+   * engine restores these values — otherwise the owner's next `claude` would silently start on
+   * whatever an agent was last switched to. Agents themselves are unaffected either way: they launch
+   * with explicit --model/--effort flags, which override the file.
+   */
+  claudeModel?: string;
+  claudeEffort?: string;
 }
 
 export interface ChannelConfig {

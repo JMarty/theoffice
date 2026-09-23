@@ -13,25 +13,31 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * sentinel so the assertion is purely about the prime GATE, not recall content.
  */
 
-const h = vi.hoisted(() => ({ sent: [] as string[], newSessionOk: true }));
+const h = vi.hoisted(() => ({ sent: [] as string[], newSessionOk: true, gateCalls: [] as { dir: string; home?: string }[] }));
 
 vi.mock("./tmux.js", () => ({
   sessionNameFor: (id: string) => `agent-${id}`,
   newSession: () => h.newSessionOk, // controllable: true = fresh session created, false = already existed
   hasSession: () => true,
   capturePane: () => "PANE",
+  // Must return true: sendText reports whether tmux accepted the chunk, and deliverPrompt now aborts
+  // the delivery on a falsy result rather than submitting a partially-typed prompt (kanban d6ada913).
   sendText: (_socket: string, _name: string, text: string) => {
     h.sent.push(text);
+    return true;
   },
-  sendKey: () => {},
+  sendKey: () => true,
   clearInput: () => {},
 }));
 vi.mock("./pane-state.js", () => ({
+  isReadyForPrompt: () => true,
+  inputBoxProvablyEmptyStyled: () => true,
+  stripPaneStyling: (s: string) => s,
   detectPaneState: () => "idle", // always ready, so deliverClaude proceeds to injection
   decideSubmitFollowup: () => "done", // submit confirmed on the first check
 }));
 vi.mock("./profile.js", () => ({ writeAgentSettings: () => {} }));
-vi.mock("./trust.js", () => ({ ensureFolderTrusted: () => {} }));
+vi.mock("./trust.js", () => ({ ensureClaudeGatesAccepted: (dir: string, home?: string) => { h.gateCalls.push({ dir, home }); } }));
 vi.mock("../queue/index.js", () => ({
   markDelivering: () => {},
   markDelivered: () => {},
@@ -39,7 +45,12 @@ vi.mock("../queue/index.js", () => ({
   requeue: () => {},
 }));
 vi.mock("../memory/conversation.js", () => ({ recordInbound: () => {} }));
-vi.mock("../memory/recall.js", () => ({ recallForPrompt: () => "MEM_PREAMBLE_SENTINEL" }));
+vi.mock("../memory/recall.js", () => ({
+  // The prime path now awaits recallForPromptAsync (recall embeds the prompt to search by meaning).
+  recallForPromptAsync: async () => "MEM_PREAMBLE_SENTINEL",
+  recallForPrompt: () => "MEM_PREAMBLE_SENTINEL",
+  PREAMBLE_MAX_CHARS: 6000,
+}));
 vi.mock("../env.js", () => ({ readEnvFile: () => ({}) }));
 
 import { claudeRuntime } from "./claude-runtime.js";
@@ -60,6 +71,7 @@ const injected = () => h.sent.join("");
 
 beforeEach(() => {
   h.sent.length = 0;
+  h.gateCalls.length = 0;
 });
 
 describe("FIX2 — priming keyed to session freshness, not engine lifetime", () => {
@@ -96,4 +108,21 @@ describe("FIX2 — priming keyed to session freshness, not engine lifetime", () 
     expect(injected()).not.toContain("MEM_PREAMBLE_SENTINEL");
     expect(injected()).toContain("hello there");
   }, 15000);
+});
+
+describe("issue #28 — gate-accept targets the agent's RESOLVED home, not the engine home", () => {
+  it("passes an ownAccount agent's own HOME (agent.dir/home) into ensureClaudeGatesAccepted", () => {
+    const own = { id: "owned28", displayName: "owned28", dir: "/tmp/office-own28", enabled: true, ownAccount: true } as never;
+    claudeRuntime.launch(cfg, own);
+    const last = h.gateCalls.at(-1);
+    expect(last).toBeDefined();
+    expect(last!.dir).toBe("/tmp/office-own28");
+    expect(last!.home).toBe("/tmp/office-own28/home"); // buildAgentEnv gives ownAccount its own HOME
+  });
+
+  it("passes the engine HOME for a shared-account agent (home == process.env.HOME)", () => {
+    const shared = { id: "shared28", displayName: "shared28", dir: "/tmp", enabled: true } as never;
+    claudeRuntime.launch(cfg, shared);
+    expect(h.gateCalls.at(-1)!.home).toBe(process.env.HOME);
+  });
 });

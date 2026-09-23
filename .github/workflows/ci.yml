@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # -S error: fail only on hard errors (existing scripts may carry style warnings)
+          shellcheck -S error bootstrap.sh scripts/*.sh
+
+  # Latest-VERIFIED release pointer: the installer pins OFFICE_REF=release, so a workshop user always
+  # gets the newest state of main that PASSED CI — never a half-finished commit. This job fast-forwards
+  # `release` to the just-verified main SHA, and only runs after `build` is green on a push to main.
+  advance-release:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the FF push has the ancestry back to release's tip
+      - name: Fast-forward release to the verified main SHA
+        run: git push origin "${{ github.sha }}:refs/heads/release"
