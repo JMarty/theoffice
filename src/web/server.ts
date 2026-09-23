@@ -106,6 +106,8 @@ const MIME: Record<string, string> = {
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
+const NO_STORE_EXT = new Set([".html", ".js", ".css", ".webmanifest"]);
+
 function json(res: ServerResponse, code: number, body: unknown): void {
   const s = JSON.stringify(body);
   res.writeHead(code, { "content-type": "application/json; charset=utf-8" });
@@ -915,6 +917,12 @@ function serveStatic(res: ServerResponse, path: string): void {
     return;
   }
   const body = readFileSync(file);
-  res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+  const ext = extname(file);
+  const headers: Record<string, string> = { "content-type": MIME[ext] ?? "application/octet-stream" };
+  // No-store on the app shell so a dashboard fix reaches the browser immediately instead of running a
+  // stale cached copy (a stale app.js kept re-locking the owner on the rate limiter). Fonts and icons
+  // are immutable, so they keep the browser's normal caching.
+  if (NO_STORE_EXT.has(ext)) headers["cache-control"] = "no-store, must-revalidate";
+  res.writeHead(200, headers);
   res.end(body);
 }

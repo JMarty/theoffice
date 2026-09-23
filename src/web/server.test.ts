@@ -171,6 +171,22 @@ describe("static file serving", () => {
     expect(await res.text()).toContain("<");
   });
 
+  // The app shell must never run from a stale browser cache: an old app.js once kept re-locking the
+  // owner on the rate limiter after the fix had shipped. Fonts/icons are immutable and stay cacheable.
+  it("marks the app shell no-store", async () => {
+    for (const p of ["/", "/app.js", "/mc/", "/mc/app.js", "/mc/style.css", "/mc/sw.js"]) {
+      const res = await fetch(`${base}${p}`);
+      expect(res.status, p).toBe(200);
+      expect(res.headers.get("cache-control"), p).toBe("no-store, must-revalidate");
+    }
+  });
+
+  it("leaves fonts and icons cacheable", async () => {
+    const res = await fetch(`${base}/mc/icon-192.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBeNull();
+  });
+
   it("keeps serving after a directory request (the process must survive)", async () => {
     await fetch(`${base}/mc`).catch(() => undefined);
     const res = await fetch(`${base}/`);
