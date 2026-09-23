@@ -2,7 +2,16 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readCredentialState, paneLooksSignedOut, extractOAuthUrl, formatDuration } from "./claude-auth.js";
+import {
+  readCredentialState,
+  paneLooksSignedOut,
+  extractOAuthUrl,
+  formatDuration,
+  restartTargets,
+  trackBusySkips,
+  paneIsBusy,
+  type AgentAuthState,
+} from "./claude-auth.js";
 
 const tmps: string[] = [];
 function credFile(body: unknown): string {
@@ -92,15 +101,67 @@ describe("readCredentialState", () => {
 });
 
 describe("paneLooksSignedOut", () => {
-  // These are the exact banners observed during the 2026-07-25 outage.
-  it("detects every signed-out banner Claude Code prints", () => {
-    expect(paneLooksSignedOut("  ▘▘ ▝▝    Opus 4.8 · API Usage Billing\n   Not logged in · Run /login")).toBe(true);
-    expect(paneLooksSignedOut("● Login expired · Please run /login")).toBe(true);
-    expect(paneLooksSignedOut("API Error: 401 Invalid authentication credentials")).toBe(true);
+  // Banners are assembled from parts so this file never contains a rendered one: a literal here
+  // would make `grep`, a code review, or a failing-test dump arm the reader's own pane.
+  const banner = (state: string, action = "Please run /login") => `${state} · ${action}`;
+
+  // The 2026-07-25 outage rendered "Run /login"; v2.1.220 renders "Please run /login". Both count.
+  it("detects the signed-out banner Claude Code renders", () => {
+    expect(paneLooksSignedOut(`  ▘▘ ▝▝    Opus 4.8 · API Usage Billing\n   ${banner("Not logged in", "Run /login")}`)).toBe(true);
+    expect(paneLooksSignedOut(`● ${banner("Login expired")}`)).toBe(true);
+    expect(paneLooksSignedOut(`● ${banner("OAuth token revoked")}`)).toBe(true);
   });
 
   it("does not fire on a healthy signed-in pane", () => {
     expect(paneLooksSignedOut(" ▐▛███▜▌   Claude Code v2.1.220\n▝▜█████▛▘  Opus 4.8 · Claude Max\n❯ Try \"edit types.ts\"")).toBe(false);
+  });
+
+  // The regression that started all this: an agent that merely PRINTS the state words — reviewing
+  // this code, quoting an API error, relaying the incident — was read as signed out, and with a
+  // valid credential the watchdog then restarted the pane that was doing the investigating.
+  it("does not fire on an agent merely talking about being signed out", () => {
+    expect(paneLooksSignedOut('const MARKERS = ["Not logged in", "Login expired", "Please run /login"];')).toBe(false);
+    expect(paneLooksSignedOut("The pane said Not logged in, so I checked whether it should run /login.")).toBe(false);
+    expect(paneLooksSignedOut("API Error: 401 Invalid authentication credentials")).toBe(false);
+  });
+
+  // A banner split across two REAL lines is prose, not a banner: only tmux's own wrap-joining
+  // (capture with join: true) may put it back together.
+  it("does not fire when the two halves sit on separate lines", () => {
+    expect(paneLooksSignedOut("Login expired\n· Please run /login")).toBe(false);
+  });
+});
+
+describe("trackBusySkips", () => {
+  it("escalates once the same agent has been skipped N ticks in a row", () => {
+    let map = new Map<string, number>();
+    for (let i = 1; i < 3; i++) {
+      const r = trackBusySkips(["zeus"], map, 3);
+      map = r.next;
+      expect(r.escalate).toEqual([]);
+    }
+    expect(trackBusySkips(["zeus"], map, 3).escalate).toEqual(["zeus"]);
+  });
+
+  // The reason the counter is per agent and not per candidate set: a set-wide counter is reset by
+  // any change to the set, so a neighbour flapping in and out would keep the stuck agent silent
+  // forever — the noisy case, which is exactly the one a human needs to hear about.
+  it("escalates a stuck agent even while another agent flaps in and out", () => {
+    let map = new Map<string, number>();
+    let escalate: string[] = [];
+    for (let tick = 0; tick < 3; tick++) {
+      const skipped = tick % 2 === 0 ? ["zeus", "argus"] : ["zeus"];
+      const r = trackBusySkips(skipped, map, 3);
+      map = r.next;
+      escalate = r.escalate;
+    }
+    expect(escalate).toEqual(["zeus"]);
+  });
+
+  it("forgets an agent as soon as it stops being skipped", () => {
+    const first = trackBusySkips(["zeus"], new Map(), 3);
+    expect(trackBusySkips([], first.next, 3).next.size).toBe(0);
+    expect(trackBusySkips(["zeus"], new Map(), 3).next.get("zeus")).toBe(1);
   });
 });
 
@@ -139,5 +200,49 @@ describe("formatDuration", () => {
     expect(formatDuration(600)).toBe("10 min");
     expect(formatDuration(7200)).toBe("2.0 h");
     expect(formatDuration(4 * 86400)).toBe("4 d");
+  });
+});
+
+describe("restartTargets", () => {
+  const state = (over: Partial<AgentAuthState>): AgentAuthState => ({
+    id: "a",
+    displayName: "A",
+    runtime: "claude",
+    signedOut: false,
+    noSession: false,
+    busy: false,
+    ...over,
+  });
+
+  // The whole point of the guard: a pane mid-turn is doing real work for someone. Killing it
+  // destroys that conversation, and the banner match that triggered it is usually the agent
+  // merely PRINTING a marker (reviewing this file, quoting an API error) rather than signed out.
+  it("never restarts a signed-out agent whose pane is busy", () => {
+    const r = restartTargets([state({ id: "zeus", signedOut: true, busy: true })]);
+    expect(r.restart).toEqual([]);
+    expect(r.skippedBusy).toEqual(["zeus"]);
+  });
+});
+
+describe("paneIsBusy", () => {
+  const SEP = "─".repeat(40);
+  const FOOTER = "  bypass permissions on (shift+tab to cycle)";
+  const idle = ["assistant reply text", SEP, "❯ ", SEP, FOOTER].join("\n");
+  const working = ["✻ Working… (3s · ↓ 0.1k tokens · esc to interrupt)", SEP, "❯ ", SEP, FOOTER].join("\n");
+
+  it("treats a clean idle prompt as not busy", () => {
+    expect(paneIsBusy(idle)).toBe(false);
+  });
+
+  it("treats a mid-turn pane as busy", () => {
+    expect(paneIsBusy(working)).toBe(true);
+  });
+
+  // Conservative on purpose: the cost of a wrong "busy" is a 5-minute wait for the next tick,
+  // the cost of a wrong "idle" is a killed conversation. Anything we cannot positively classify
+  // as a clean idle prompt must count as busy.
+  it("treats an unclassifiable pane as busy rather than guessing it is safe to kill", () => {
+    expect(paneIsBusy("garbled output with no footer")).toBe(true);
+    expect(paneIsBusy("")).toBe(true);
   });
 });
