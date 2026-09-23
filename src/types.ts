@@ -120,6 +120,11 @@ export interface WebConfig {
    * spoofing its rate-limit IP. Unset = forwarding headers trusted as before (backward compatible).
    */
   trustedProxyToken?: string;
+  /**
+   * Which dashboard `/` opens: "classic" (default) or "mc" (Mission Control, served under /mc/).
+   * With "mc", `/` redirects to /mc/ and Mission Control hides its "Classic" switch link.
+   */
+  dashboard?: "classic" | "mc";
   rateLimit?: {
     maxFails: number;
     windowMs: number;

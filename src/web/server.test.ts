@@ -178,6 +178,49 @@ describe("static file serving", () => {
   });
 });
 
+describe("default dashboard (web.dashboard)", () => {
+  let tempDir: string;
+  let stopServer: () => void;
+  let base: string;
+
+  const start = async (dashboard?: "classic" | "mc") => {
+    tempDir = join(tmpdir(), "theoffice-dash-test-" + Math.random().toString(36).slice(2));
+    mkdirSync(join(tempDir, "store"), { recursive: true });
+    writeFileSync(join(tempDir, "store", ".dashboard-token"), MOCK_TOKEN);
+    const port = await freePort();
+    base = `http://127.0.0.1:${port}`;
+    const cfg: any = {
+      web: { host: "127.0.0.1", port, ...(dashboard ? { dashboard } : {}) },
+      paths: { dashboardTokenFile: join(tempDir, "store", ".dashboard-token") },
+      owner: { timezone: "UTC" },
+      channel: { provider: "none" },
+    };
+    stopServer = startServer(cfg);
+    await new Promise((r) => setTimeout(r, 100));
+  };
+
+  afterEach(() => {
+    if (stopServer) stopServer();
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("serves the classic UI at / by default", async () => {
+    await start();
+    const res = await fetch(`${base}/`, { redirect: "manual" });
+    expect(res.status).toBe(200);
+  });
+
+  it("redirects / to Mission Control when web.dashboard is 'mc'", async () => {
+    await start("mc");
+    for (const p of ["/", "/index.html"]) {
+      const res = await fetch(`${base}${p}`, { redirect: "manual" });
+      expect(res.status, p).toBe(302);
+      expect(res.headers.get("location"), p).toBe("/mc/");
+    }
+    expect((await fetch(`${base}/mc/`)).status).toBe(200);
+  });
+});
+
 /**
  * Model/effort pins are written to agent.json FIRST and only then applied to the live pane, so a
  * pin is never lost just because the injection could not happen. These tests run with no tmux
