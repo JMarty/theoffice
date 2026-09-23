@@ -175,6 +175,9 @@ async function refreshData() {
   OVERVIEW = overview || {};
   USAGE = Object.fromEntries((usage.usage || []).map((u) => [u.id, u]));
   HOST = host || {};
+  // Mission Control is the configured default (web.dashboard = "mc"): "/" redirects here, so the
+  // Classic switch would just bounce back — hide it.
+  if (HOST.dashboard === "mc") $("#ui-switch")?.remove();
   SCHEDULES = Array.isArray(schedules) ? schedules : [];
   if (runtimes && runtimes.runtimes && runtimes.runtimes.length) RUNTIMES = runtimes.runtimes;
   if (runtimes && runtimes.maxCodexAgents) MAX_CODEX = runtimes.maxCodexAgents;
