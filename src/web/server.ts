@@ -248,6 +248,11 @@ export function startServer(cfg: EngineConfig): () => void {
         return json(res, 500, { error: "server error" });
       }
     }
+    if (cfg.web.dashboard === "mc" && (path === "/" || path === "/index.html")) {
+      res.writeHead(302, { location: "/mc/" });
+      res.end();
+      return;
+    }
     return serveStatic(res, path);
   };
 
@@ -401,6 +406,7 @@ async function handleApi(
       memTotalBytes: memTotal,
       runtime: "Node · container",
       port: cfg.web.port,
+      dashboard: cfg.web.dashboard ?? "classic",
     });
   }
   // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
