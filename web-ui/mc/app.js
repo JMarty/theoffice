@@ -718,13 +718,21 @@ window.authCancel = async () => {
   renderAuthBanner();
 };
 
+function restartSummary(r) {
+  const lines = [`Restarted ${(r.restarted || []).length} agent(s).`];
+  if ((r.skippedBusy || []).length) lines.push(`Left alone (mid-task): ${r.skippedBusy.join(", ")}`);
+  if ((r.failed || []).length) lines.push(`Failed: ${r.failed.join(", ")}`);
+  return lines.join("\n");
+}
+
 /** Credential is valid, panes are stale — the case a plain restart genuinely fixes. */
 window.authRestart = async (btn) => {
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = "Restarting…";
   try {
     const r = await post("/api/auth/restart", {});
-    alert(r && r.ok ? `Restarted ${(r.restarted || []).length} agent(s).` : "Restart failed.");
+    // Skipped agents are reported too: "Restarted 0" with no reason invites a second press.
+    alert(r && r.ok ? restartSummary(r) : "Restart failed.");
   } catch (e) {
     alert("Restart failed: " + e.message);
   } finally {
