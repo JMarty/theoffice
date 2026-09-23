@@ -21,8 +21,9 @@
        style="position:fixed;top:10px;right:12px;z-index:99999;font:600 12px/1 system-ui,sans-serif;
               text-decoration:none;color:#9aa4b2;background:rgba(127,127,127,.16);
               border:1px solid rgba(127,127,127,.3);border-radius:7px;padding:6px 10px;">&#8592; Classic</a>
-    <!-- Token gate (shown until a valid token connects) -->
-    <div id="gate">
+    <!-- Token gate — hidden by default so a saved-token session doesn't flash it; app.js
+         reveals it only when there is no token or the token fails. -->
+    <div id="gate" class="hidden">
       <div class="brand-lg">The Office</div>
       <span class="ml">Mission Control</span>
       <input id="token" type="password" placeholder="dashboard token" autocomplete="off" />
