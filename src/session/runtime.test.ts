@@ -53,6 +53,8 @@ describe("runtime registry", () => {
 
   it("advertises the current claude models, aliases not dated snapshots", () => {
     const models = getRuntime("claude").models;
+    expect(models).toContain("claude-fable-5-1");
+    expect(models).toContain("claude-opus-5-5");
     expect(models).toContain("claude-opus-5");
     expect(models).toContain("claude-fable-5");
     expect(models).toContain("claude-sonnet-5");
@@ -61,6 +63,10 @@ describe("runtime registry", () => {
     // the dated snapshot id must not come back — offer the alias
     expect(models).toContain("claude-haiku-4-5");
     expect(models).not.toContain("claude-haiku-4-5-20251001");
+  });
+
+  it("lists the newest claude models first, so the dashboard menu leads with them", () => {
+    expect(getRuntime("claude").models.slice(0, 2)).toEqual(["claude-fable-5-1", "claude-opus-5-5"]);
   });
 
   it("advertises gemini models as agy slugs, never human labels", () => {

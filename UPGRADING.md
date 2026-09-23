@@ -25,6 +25,10 @@ If the value is not in `agy models`, replace it with the matching slug (dashboar
 
 **No action required otherwise:**
 
+- The Claude model list gained Fable 5.1 (`claude-fable-5-1`) and Opus 5.5 (`claude-opus-5-5`), now
+  listed first. Every earlier entry stays, so existing pins keep working. Opus 5.5's API-level effort
+  default is `medium` (Opus 5: `high`); if an agent should think harder, pin `effort` explicitly.
+
 - The Claude model list gained Opus 5, Fable 5 and Sonnet 5, and the Haiku entry moved from the dated
   snapshot id to the `claude-haiku-4-5` alias. Existing pins keep working — previous model names
   remain usable via `--model`, which is how the engine launches agents.

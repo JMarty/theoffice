@@ -289,10 +289,13 @@ async function deliverClaude(cfg: EngineConfig, agent: AgentDef, item: QueuedIte
 export const claudeRuntime: Runtime = {
   id: "claude",
   label: "Claude (Claude Code)",
-  // Selectable --model ids, verified live against this account's /model menu (2026-07-26).
-  // Opus 4.8 is no longer listed in that menu but stays here: `home` and `zeus` run on it and the
-  // menu itself notes that previous model names remain usable via --model, which is how we launch.
+  // Selectable --model ids (also the allowlist for dashboard/office-tune model changes), newest first.
+  // Fable 5.1 and Opus 5.5 added 2026-09-23. Older entries stay: agents pinned to them keep working
+  // (Opus 4.8: `home` and `zeus` run on it), and previous model names remain usable via --model,
+  // which is how we launch.
   models: [
+    "claude-fable-5-1",
+    "claude-opus-5-5",
     "claude-opus-5",
     "claude-fable-5",
     "claude-sonnet-5",
