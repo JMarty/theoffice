@@ -28,6 +28,7 @@ import { sessionNameFor, launchAgent } from "../session/session-manager.js";
 import { hasSession, capturePane, killSession } from "../session/tmux.js";
 import { detectPaneState } from "../session/pane-state.js";
 import { isCodexBusy } from "../session/codex-runtime.js";
+import { isGeminiBusy } from "../session/gemini-runtime.js";
 import { applyTune, type TuneKind } from "../session/tune.js";
 import { restoreOwnerSettings } from "../session/claude-settings.js";
 import { normalizeEffort } from "../session/effort.js";
@@ -324,6 +325,9 @@ async function handleApi(
           // codex agents run an idle tmux HOLDER (not a Claude TUI), so pane-state can't classify them.
           // Liveness comes from the exec tracker instead: a turn in flight = busy, otherwise idle.
           state = isCodexBusy(a.id) ? "busy" : "idle";
+        } else if (a.runtime === "gemini") {
+          // gemini (Antigravity) also runs an idle HOLDER, not a Claude TUI — same deal as codex.
+          state = isGeminiBusy(a.id) ? "busy" : "idle";
         } else {
           const pane = capturePane(cfg.tmux.socket, session);
           // Shown to a human debugging the fleet. Beware: this reports "idle" when a TALL draft is
