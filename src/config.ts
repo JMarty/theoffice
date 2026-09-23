@@ -102,6 +102,7 @@ export function loadConfig(): EngineConfig {
     web: { 
       host: "127.0.0.1", 
       port: 3430,
+      dashboard: "mc", // fork default: Mission Control only (upstream default is "classic")
       rateLimit: {
         maxFails: 5,
         windowMs: 15 * 60 * 1000, // 15 mins
