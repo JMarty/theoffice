@@ -280,7 +280,7 @@ async function showTab(name) {
 }
 
 // ---------------- views ----------------
-const MODEL_LABEL = { default: "default", "claude-opus-5": "Opus 5", "claude-fable-5": "Fable 5", "claude-sonnet-5": "Sonnet 5", "claude-opus-4-8": "Opus 4.8", "claude-haiku-4-5": "Haiku 4.5" };
+const MODEL_LABEL = { default: "default", "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-opus-5": "Opus 5", "claude-fable-5": "Fable 5", "claude-sonnet-5": "Sonnet 5", "claude-opus-4-8": "Opus 4.8", "claude-haiku-4-5": "Haiku 4.5" };
 const runtimeDef = (id) => RUNTIMES.find((r) => r.id === (id || "claude")) || RUNTIMES[0];
 
 function agentCard(a) {
