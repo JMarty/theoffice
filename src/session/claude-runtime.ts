@@ -292,10 +292,17 @@ export const claudeRuntime: Runtime = {
   // Selectable --model ids, verified live against this account's /model menu (2026-07-26).
   // Opus 4.8 is no longer listed in that menu but stays here: `home` and `zeus` run on it and the
   // menu itself notes that previous model names remain usable via --model, which is how we launch.
+  // claude-sonnet-5-5 / claude-opus-5-5 added 2026-09-30 (owner request, relayed via marveen;
+  // release confirmed by fetching anthropic.com/claude-sonnet-5-5 directly before acting, not
+  // taken on the relay alone). Verified live non-interactively (`claude -p ... --model <id>`,
+  // same "actually launches a real session" bar as the /model-menu check above) rather than via
+  // the interactive /model menu, since this box has no TTY for that here.
   models: [
     "claude-opus-5",
     "claude-fable-5",
     "claude-sonnet-5",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-opus-4-8",
     "claude-haiku-4-5",
   ],
