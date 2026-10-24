@@ -56,6 +56,10 @@ describe("runtime registry", () => {
     expect(models).toContain("claude-opus-5");
     expect(models).toContain("claude-fable-5");
     expect(models).toContain("claude-sonnet-5");
+    expect(models).toContain("claude-sonnet-5-5");
+    expect(models).toContain("claude-opus-5-5");
+    expect(models).toContain("claude-fable-5-1");
+    expect(models).toContain("claude-haiku-5-5");
     // opus 4.8 stays: live agents (home, zeus) still run on it
     expect(models).toContain("claude-opus-4-8");
     // the dated snapshot id must not come back — offer the alias

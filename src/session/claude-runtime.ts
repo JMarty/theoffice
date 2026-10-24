@@ -297,12 +297,17 @@ export const claudeRuntime: Runtime = {
   // taken on the relay alone). Verified live non-interactively (`claude -p ... --model <id>`,
   // same "actually launches a real session" bar as the /model-menu check above) rather than via
   // the interactive /model menu, since this box has no TTY for that here.
+  // claude-fable-5-1 / claude-haiku-5-5 added 2026-10-24; every id in this list was re-verified live
+  // the same way that day (`claude -p ... --model <id>`, Claude Code 2.1.310). That check does
+  // discriminate: made-up ids such as claude-sonnet-5-1 are rejected by it.
   models: [
     "claude-opus-5",
     "claude-fable-5",
     "claude-sonnet-5",
     "claude-sonnet-5-5",
     "claude-opus-5-5",
+    "claude-fable-5-1",
+    "claude-haiku-5-5",
     "claude-opus-4-8",
     "claude-haiku-4-5",
   ],
