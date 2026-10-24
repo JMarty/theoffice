@@ -14,6 +14,7 @@ import {
   submitConfirmed,
   safeToResubmit,
   liveInputBox,
+  detectsStuckPendingPaste,
 } from "./pane-state.js";
 
 const SEP = "─".repeat(40);
@@ -560,4 +561,26 @@ describe("usage-limit sweeper acts on NOTHING but the positive limit-modal signa
       expect(detectsPermissionPrompt(p)).toBe(false);
     });
   }
+});
+
+describe("detectsStuckPendingPaste (the 2026-10-24 jam: a multi-line delivery whose Enter was lost)", () => {
+  it("idle footer + a pasted-text placeholder in the live input box -> stuck", () => {
+    expect(detectsStuckPendingPaste(pane("some earlier output", SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe(true);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ SWAP-GROWTH TRIPWIRE ... [Pasted text #2 +900 chars]", SEP, FOOTER_SHELLS))).toBe(true);
+  });
+  it("the same pane reads busy to the deliverer (that is why nothing delivers behind it)", () => {
+    expect(detectPaneState(pane(SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe("busy");
+  });
+  it("a working agent is never stuck (a busy signal wins), nor is a clean or typing box", () => {
+    expect(detectsStuckPendingPaste(pane("✻ Thinking… (12s · ↓ 1.2k tokens)", SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe(false);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ ", SEP, FOOTER))).toBe(false);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ half a sentence", SEP, FOOTER))).toBe(false);
+  });
+  it("a placeholder only QUOTED in the scrollback (a tool result) is not stuck", () => {
+    expect(detectsStuckPendingPaste(pane("the tool printed: [Pasted text #1 +4 lines]", SEP, "❯ ", SEP, FOOTER))).toBe(false);
+  });
+  it("no idle footer (a modal, a menu) -> never stuck: no Enter may go near a modal", () => {
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ [Pasted text #1 +4 lines]", SEP, "  Enter to confirm · Esc to cancel"))).toBe(false);
+    expect(detectsStuckPendingPaste("")).toBe(false);
+  });
 });

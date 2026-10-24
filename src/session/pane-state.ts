@@ -443,6 +443,24 @@ export function safeToResubmit(pane: string): boolean {
   return IDLE_FOOTER_RX.test(plain);
 }
 
+/**
+ * A multi-line delivery that was typed but never submitted: the composer holds a `[Pasted text #N ...]`
+ * placeholder, the agent is NOT working (idle footer, no busy signal). detectPaneState reads this pane as
+ * "busy" (a pending paste never auto-submits), so the deliverer gates shut behind it, and the only Enter
+ * that was ever going to submit it belonged to the delivery that has already given up. Nothing else
+ * presses it: on 2026-10-24 toby sat deaf from 08:27 to 14:02 and darryl from 08:25 until a human pressed
+ * Enter (2h15), each behind one such placeholder, while the bus queued everything behind them.
+ *
+ * Pure and deliberately narrow: idle footer present, NO busy indicator, and the placeholder is inside the
+ * LIVE input box (a pane that merely quotes "[Pasted text #1" in its scrollback, as a tool result can,
+ * is not stuck). The sweeper confirms it across consecutive ticks before it acts, so a delivery that is
+ * still pressing its own Enter is never raced.
+ */
+export function detectsStuckPendingPaste(pane: string): boolean {
+  if (!pane || !pane.trim()) return false;
+  return shouldRetrySubmit(pane, "");
+}
+
 export type SubmitFollowupAction = "retry-enter" | "done" | "give-up";
 
 /**

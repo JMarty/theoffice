@@ -20,6 +20,10 @@
 //   3. Detect a permission/approval prompt and ALARM — NEVER dismiss it. Clearing one grants an
 //      authorisation (delete/push/payment/deploy) blind. Freezing is the safe failure; a human decides.
 //
+//   3b. Submit a STUCK PENDING PASTE: a multi-line delivery whose Enter was lost leaves `[Pasted text #N]` in
+//      the composer; the pane reads "busy" forever and the bus queues behind it (toby 2026-10-24, 08:27-14:02).
+//      Enter on an idle, non-modal pane with a pending paste is exactly what the lost Enter was meant to do.
+//
 //   4. Drop stale scheduler heartbeats so a moot briefing isn't delivered ahead of, or instead of, live
 //      work. Owner and inter-agent messages are never age-dropped.
 
@@ -30,6 +34,7 @@ import {
   detectsUsageLimitModal,
   detectsUnsafeUsageLimitModal,
   detectsPermissionPrompt,
+  detectsStuckPendingPaste,
 } from "./pane-state.js";
 import {
   reapStaleScheduler,
@@ -46,6 +51,11 @@ const TICK_MS = 20_000;
 const DISMISS_COOLDOWN_MS = 15_000;
 // Re-alarm about the same frozen permission prompt at most this often (a human is needed; don't page every tick).
 const PERMISSION_REALARM_MS = 30 * 60 * 1000;
+// A pending-paste placeholder must be seen on this many CONSECUTIVE ticks (20 s each) before the sweeper
+// presses Enter, so a delivery that is still pressing its own Enter is never raced; then at most this many
+// Enters per stuck episode, spaced by the dismiss cooldown, before it only logs.
+const STUCK_PASTE_TICKS = 2;
+const STUCK_PASTE_MAX_ENTERS = 6;
 
 function envSec(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -68,6 +78,7 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
   let stopped = false;
   const lastDismissAt = new Map<string, number>();
   const lastPermAlarmAt = new Map<string, number>();
+  const stuckPaste = new Map<string, { ticks: number; enters: number }>();
 
   // ---- 2 & 3: per-session modal handling ----
   const sweepModals = () => {
@@ -93,6 +104,22 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
         logger.error({ session }, "usage-limit modal present but highlight NOT on Stop-and-wait — left untouched (Enter could select Upgrade); needs a human");
         continue;
       }
+
+      // 3b. A pending paste that never got its Enter. Seen on consecutive ticks, then Enter (bounded).
+      if (detectsStuckPendingPaste(pane)) {
+        const st = stuckPaste.get(session) ?? { ticks: 0, enters: 0 };
+        st.ticks += 1; stuckPaste.set(session, st);
+        const t = Date.now();
+        if (st.ticks >= STUCK_PASTE_TICKS && st.enters < STUCK_PASTE_MAX_ENTERS && t - (lastDismissAt.get(session) ?? 0) >= DISMISS_COOLDOWN_MS) {
+          lastDismissAt.set(session, t); st.enters += 1;
+          const ok = sendKey(socket, session, "Enter");
+          logger.warn({ session, ok, enters: st.enters, ticks: st.ticks }, "pending pasted text parked in the input box (a delivery's Enter was lost) — sent Enter to submit it");
+        } else if (st.enters >= STUCK_PASTE_MAX_ENTERS && st.ticks === STUCK_PASTE_TICKS + STUCK_PASTE_MAX_ENTERS * 2) {
+          logger.error({ session }, "pending pasted text is STILL parked after repeated Enters — needs a human (deliveries to this agent are gated behind it)");
+        }
+        continue;
+      }
+      stuckPaste.delete(session);
 
       // 2. Usage-limit modal with the highlight provably on Stop-and-wait: safe to confirm option 1.
       if (!detectsUsageLimitModal(pane)) continue;
