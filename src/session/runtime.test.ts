@@ -55,6 +55,8 @@ describe("runtime registry", () => {
     const models = getRuntime("claude").models;
     expect(models).toContain("claude-fable-5-1");
     expect(models).toContain("claude-opus-5-5");
+    expect(models).toContain("claude-sonnet-5-5");
+    expect(models).toContain("claude-haiku-5-5");
     expect(models).toContain("claude-opus-5");
     expect(models).toContain("claude-fable-5");
     expect(models).toContain("claude-sonnet-5");
