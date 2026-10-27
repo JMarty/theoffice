@@ -27,8 +27,8 @@ interface OldKanbanRow {
 export function migrateOwnerCards(): MigrationResult {
   const db = getDb();
   const rows = db
-    .prepare(`SELECT id, title, description, project, status, created_at, archived_at FROM kanban_cards WHERE assignee='owner'`)
-    .all() as OldKanbanRow[];
+    .prepare(`SELECT id, title, description, project, status, created_at, archived_at FROM kanban_cards WHERE assignee=?`)
+    .all(process.env.OWNER_HANDLE ?? "owner") as OldKanbanRow[];
 
   const insert = db.prepare(
     `INSERT INTO owner_cards (id, kind, agent, project, title, body, status, closed_via, source_kanban_id, created_at, updated_at)

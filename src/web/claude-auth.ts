@@ -41,7 +41,7 @@ const LOGIN_SESSION = "__office-login";
 const LOGIN_COLS = 500;
 const LOGIN_ROWS = 50;
 
-/** Credential file every agent on this box shares (agents inherit HOME=owner). */
+/** Credential file every agent on this box shares (agents inherit the owner HOME). */
 export const CREDENTIALS_FILE = join(homedir(), ".claude", ".credentials.json");
 
 /**

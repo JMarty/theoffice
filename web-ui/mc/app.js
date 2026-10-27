@@ -848,8 +848,8 @@ function obRenderDetail() {
     root.id = "ob-detail-root";
     document.body.appendChild(root);
   }
-  const msg = (cm) => `<div class="obmsg ${cm.author === "owner" ? "owner" : ""}">
-      <div class="obma"><b>${esc(cm.author === "owner" ? "the owner" : nm(cm.author))}</b><span>${ago(cm.created_at)}</span>
+  const msg = (cm) => `<div class="obmsg ${cm.author === (HOST.ownerHandle || "owner") ? "owner" : ""}">
+      <div class="obma"><b>${esc(cm.author === (HOST.ownerHandle || "owner") ? (HOST.ownerName || "Owner") : nm(cm.author))}</b><span>${ago(cm.created_at)}</span>
         ${cm.tray ? `<span class="obtray">${esc(cm.tray)}${cm.sent_at ? " · sent" : ""}</span>` : ""}</div>
       <div class="obmtext">${obRenderText(cm.text)}</div>
     </div>`;
@@ -910,7 +910,7 @@ window.obSaveComment = async (id, btn) => {
     const text = ((ta && ta.value) || "").trim();
     if (!text) return;
     const tray = window._obTray || "batch";
-    await post(`/api/owner-cards/${encodeURIComponent(id)}/comments`, { author: "owner", text, tray });
+    await post(`/api/owner-cards/${encodeURIComponent(id)}/comments`, { author: HOST.ownerHandle || "owner", text, tray });
     const full = await api(`/api/owner-cards/${encodeURIComponent(id)}`);
     window._obDetailCache[id] = full;
     // visible confirmation before the composer clears and the thread refreshes out from under it —

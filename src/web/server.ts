@@ -417,6 +417,8 @@ async function handleApi(
       runtime: "Node · container",
       port: cfg.web.port,
       dashboard: cfg.web.dashboard ?? "classic",
+      ownerHandle: cfg.owner.handle ?? "owner",
+      ownerName: cfg.owner.displayName,
     });
   }
   // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
@@ -843,7 +845,7 @@ async function handleApi(
     return json(res, 200, found);
   }
 
-  // POST /api/owner-cards/<id>/comments — owner: {author:'owner',text,tray} · agent: {author,text,needs_you?}
+  // POST /api/owner-cards/<id>/comments — owner: {author:<cfg.owner.handle>,text,tray} · agent: {author,text,needs_you?}
   const ocComment = path.match(/^\/api\/owner-cards\/([^/]+)\/comments$/);
   if (ocComment && m === "POST") {
     const raw = await readBody(req, res); if (raw === null) return;
