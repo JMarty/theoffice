@@ -57,11 +57,14 @@ function setReconnecting(on, firstLoad) {
   } else {
     bar && bar.classList.add("hidden"); screen && screen.classList.add("hidden");
     const pill = $("#connpill"); if (pill) { pill.classList.remove("bad"); const b = pill.querySelector("b"); if (b) b.textContent = "connected"; }
-    RC_DELAY = 2000;
+    RC_DELAY = 2000; RC_FAILS = 0;
   }
 }
+let RC_FAILS = 0;
 function scheduleRetry(fn) {
   clearTimeout(RC_TIMER);
+  // after ~6 failed tries the engine may not be restarting at all: an expired Cloudflare Access login also answers with an HTML page, which lands here
+  if (++RC_FAILS >= 6) { const sub = $("#rc-sub"); if (sub) sub.textContent = "Still not reachable. If this address asks you to sign in, open it in a normal tab, sign in again, then come back."; }
   RC_TIMER = setTimeout(fn, RC_DELAY);
   RC_DELAY = Math.min(RC_DELAY * 1.5, 10000); // 2s, 3s, 4.5s ... capped at 10s: back quickly after a restart, gentle if it stays down
 }

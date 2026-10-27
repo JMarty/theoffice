@@ -29,22 +29,35 @@ export interface AgentUsage {
   tracked: boolean;
 }
 
+const USAGE_WORKER_TIMEOUT_MS = 120_000;
+
 /**
  * computeUsage in a worker thread, so the ~10 s transcript scan never freezes the engine's event loop (Slack ingest, the deliverer and the
- * dashboard API all share it). Falls back to computing inline if the worker cannot start (e.g. running from source under test).
+ * dashboard API all share it). It never throws and never hangs:
+ *  - a worker that cannot START (module not found, e.g. running from source) falls back to computing inline, inside a try/catch;
+ *  - a worker that fails WHILE computing, exits without answering or is silent for 2 minutes (then terminated) rejects, handled by the caller;
+ *  - it settles exactly once.
  */
 export function computeUsageAsync(agents: AgentDef[], cutoffMs: number): Promise<AgentUsage[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let done = false;
-    const inline = () => { if (!done) { done = true; resolve(computeUsage(agents, cutoffMs)); } };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (fn: () => void) => { if (done) return; done = true; if (timer) clearTimeout(timer); fn(); };
+    const inline = () => finish(() => { try { resolve(computeUsage(agents, cutoffMs)); } catch (e) { reject(e); } });
+    let w: Worker;
     try {
-      const w = new Worker(new URL("./usage-worker.js", import.meta.url), { workerData: { agents, cutoff: cutoffMs } });
-      w.once("message", (r: AgentUsage[]) => { done = true; resolve(r); void w.terminate(); });
-      w.once("error", inline);
-      w.once("exit", () => inline());
+      w = new Worker(new URL("./usage-worker.js", import.meta.url), { workerData: { agents, cutoff: cutoffMs } });
     } catch {
       inline();
+      return;
     }
+    timer = setTimeout(() => { finish(() => reject(new Error("usage worker timed out"))); void w.terminate(); }, USAGE_WORKER_TIMEOUT_MS);
+    w.once("message", (r: AgentUsage[]) => { finish(() => resolve(r)); void w.terminate(); });
+    w.once("error", (e: NodeJS.ErrnoException) => {
+      if (e && (e.code === "ERR_MODULE_NOT_FOUND" || e.code === "ERR_WORKER_PATH")) inline(); // could not start: compute here
+      else finish(() => reject(e));
+    });
+    w.once("exit", (code) => finish(() => reject(new Error(`usage worker exited (${code}) without an answer`))));
   });
 }
 

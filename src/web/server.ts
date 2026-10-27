@@ -444,10 +444,15 @@ async function handleApi(
         usageCache.set(w, { at: _now(), body });
         return body;
       }).finally(() => usageInflight.delete(w));
+      pending.catch((err) => logger.warn({ err: String((err as Error)?.message ?? err) }, "usage refresh failed")); // handled: a failed background refresh must never be an unhandled rejection
       usageInflight.set(w, pending);
     }
     if (hit) return json(res, 200, hit.body); // fresh, or stale while the refresh above runs
-    return json(res, 200, await pending!);
+    try {
+      return json(res, 200, await pending!);
+    } catch {
+      return json(res, 503, { error: "usage temporarily unavailable" });
+    }
   }
 
   // GET /api/update/check — list commits this install is behind
