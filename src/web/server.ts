@@ -28,6 +28,7 @@ import { sessionNameFor, launchAgent } from "../session/session-manager.js";
 import { hasSession, capturePane, killSession } from "../session/tmux.js";
 import { detectPaneState } from "../session/pane-state.js";
 import { isCodexBusy } from "../session/codex-runtime.js";
+import { isGeminiBusy } from "../session/gemini-runtime.js";
 import { applyTune, type TuneKind } from "../session/tune.js";
 import { restoreOwnerSettings } from "../session/claude-settings.js";
 import { normalizeEffort } from "../session/effort.js";
@@ -114,6 +115,8 @@ const MIME: Record<string, string> = {
   ".woff": "font/woff",
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
+
+const NO_STORE_EXT = new Set([".html", ".js", ".css", ".webmanifest"]);
 
 function json(res: ServerResponse, code: number, body: unknown): void {
   const s = JSON.stringify(body);
@@ -255,6 +258,11 @@ export function startServer(cfg: EngineConfig): () => void {
         return json(res, 500, { error: "server error" });
       }
     }
+    if (cfg.web.dashboard === "mc" && (path === "/" || path === "/index.html")) {
+      res.writeHead(302, { location: "/mc/" });
+      res.end();
+      return;
+    }
     return serveStatic(res, path);
   };
 
@@ -334,6 +342,9 @@ async function handleApi(
           // codex agents run an idle tmux HOLDER (not a Claude TUI), so pane-state can't classify them.
           // Liveness comes from the exec tracker instead: a turn in flight = busy, otherwise idle.
           state = isCodexBusy(a.id) ? "busy" : "idle";
+        } else if (a.runtime === "gemini") {
+          // gemini (Antigravity) also runs an idle HOLDER, not a Claude TUI — same deal as codex.
+          state = isGeminiBusy(a.id) ? "busy" : "idle";
         } else {
           const pane = capturePane(cfg.tmux.socket, session);
           // Shown to a human debugging the fleet. Beware: this reports "idle" when a TALL draft is
@@ -405,6 +416,7 @@ async function handleApi(
       memTotalBytes: memTotal,
       runtime: "Node · container",
       port: cfg.web.port,
+      dashboard: cfg.web.dashboard ?? "classic",
     });
   }
   // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
@@ -459,7 +471,10 @@ async function handleApi(
     try {
       const r = await submitCode(cfg, String(b.code ?? ""));
       if (!r.ok) return json(res, 200, r);
-      const restarted = b.restart === false ? { restarted: [], failed: [] } : restartSignedOutAgents(cfg, { all: true });
+      const restarted =
+        b.restart === false
+          ? { restarted: [], failed: [], skippedBusy: [] }
+          : restartSignedOutAgents(cfg, { all: true });
       return json(res, 200, { ...r, ...restarted });
     } catch (e) {
       logger.error({ err: e }, "login code failed");
@@ -1008,6 +1023,12 @@ function serveStatic(res: ServerResponse, path: string): void {
     return;
   }
   const body = readFileSync(file);
-  res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+  const ext = extname(file);
+  const headers: Record<string, string> = { "content-type": MIME[ext] ?? "application/octet-stream" };
+  // No-store on the app shell so a dashboard fix reaches the browser immediately instead of running a
+  // stale cached copy (a stale app.js kept re-locking the owner on the rate limiter). Fonts and icons
+  // are immutable, so they keep the browser's normal caching.
+  if (NO_STORE_EXT.has(ext)) headers["cache-control"] = "no-store, must-revalidate";
+  res.writeHead(200, headers);
   res.end(body);
 }

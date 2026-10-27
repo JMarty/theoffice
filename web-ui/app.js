@@ -34,7 +34,7 @@ async function post(path, body) {
   return r.json();
 }
 
-const MODEL_LABEL = { default: "default", "claude-opus-4-8": "Opus 4.8", "claude-sonnet-4-6": "Sonnet 4.6", "claude-haiku-4-5-20251001": "Haiku 4.5" };
+const MODEL_LABEL = { default: "default", "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5", "claude-haiku-5-5": "Haiku 5.5", "claude-opus-5": "Opus 5", "claude-fable-5": "Fable 5", "claude-sonnet-5": "Sonnet 5", "claude-opus-4-8": "Opus 4.8", "claude-sonnet-4-6": "Sonnet 4.6", "claude-haiku-4-5": "Haiku 4.5", "claude-haiku-4-5-20251001": "Haiku 4.5" };
 let RUNTIMES = [{ id: "claude", label: "Claude", models: [] }]; // populated from /api/runtimes
 let MAX_CODEX = 2;
 const runtimeDef = (id) => RUNTIMES.find((r) => r.id === (id || "claude")) || RUNTIMES[0];
@@ -478,12 +478,22 @@ window.authCancel = async () => {
   renderAuthBanner();
 };
 
+function restartSummary(r) {
+  const lines = [`Restarted ${(r.restarted || []).length} agent(s).`];
+  if ((r.skippedBusy || []).length) lines.push(`Left alone (mid-task): ${r.skippedBusy.join(", ")}`);
+  if ((r.failed || []).length) lines.push(`Failed: ${r.failed.join(", ")}`);
+  return lines.join("\n");
+}
+
 window.authRestart = async (btn) => {
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = "Restarting…";
   try {
     const r = await post("/api/auth/restart", {});
-    alert(r && r.ok ? `Restarted ${(r.restarted || []).length} agent(s).` : "Restart failed.");
+    // Report the skipped ones too. Without this a run that touched nothing because every candidate
+    // was mid-task reads as "Restarted 0 agent(s)" — no reason given, so the obvious move is to
+    // press the button again, and again.
+    alert(r && r.ok ? restartSummary(r) : "Restart failed.");
   } catch (e) { alert("Restart failed: " + e.message); }
   finally { btn.disabled = false; btn.textContent = label; setTimeout(refreshAuth, 3000); }
 };

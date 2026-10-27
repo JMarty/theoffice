@@ -289,20 +289,20 @@ async function deliverClaude(cfg: EngineConfig, agent: AgentDef, item: QueuedIte
 export const claudeRuntime: Runtime = {
   id: "claude",
   label: "Claude (Claude Code)",
-  // Selectable --model ids, verified live against this account's /model menu (2026-07-26).
-  // Opus 4.8 is no longer listed in that menu but stays here: `home` and `agent-a` run on it and the
-  // menu itself notes that previous model names remain usable via --model, which is how we launch.
-  // claude-sonnet-5-5 / claude-opus-5-5 added 2026-09-30 (owner request, relayed via marveen;
-  // release confirmed by fetching anthropic.com/claude-sonnet-5-5 directly before acting, not
-  // taken on the relay alone). Verified live non-interactively (`claude -p ... --model <id>`,
-  // same "actually launches a real session" bar as the /model-menu check above) rather than via
-  // the interactive /model menu, since this box has no TTY for that here.
+  // Selectable --model ids (also the allowlist for dashboard/office-tune model changes), newest first.
+  // Fable 5.1 and Opus 5.5 added 2026-09-23; Sonnet 5.5 added 2026-09-30 upstream; Haiku 5.5 added
+  // 2026-10-24. Every id here re-verified live 2026-10-24 via `claude -p ... --model <id>` (Claude Code
+  // 2.1.310), which rejects unknown ids. Older entries stay: agents pinned to them keep working
+  // (Opus 4.8: `home` and `agent-a` run on it), and previous model names remain usable via --model,
+  // which is how we launch.
   models: [
+    "claude-fable-5-1",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5",
     "claude-opus-5",
     "claude-fable-5",
     "claude-sonnet-5",
-    "claude-sonnet-5-5",
-    "claude-opus-5-5",
     "claude-opus-4-8",
     "claude-haiku-4-5",
   ],

@@ -171,10 +171,69 @@ describe("static file serving", () => {
     expect(await res.text()).toContain("<");
   });
 
+  // The app shell must never run from a stale browser cache: an old app.js once kept re-locking the
+  // owner on the rate limiter after the fix had shipped. Fonts/icons are immutable and stay cacheable.
+  it("marks the app shell no-store", async () => {
+    for (const p of ["/", "/app.js", "/mc/", "/mc/app.js", "/mc/style.css", "/mc/sw.js"]) {
+      const res = await fetch(`${base}${p}`);
+      expect(res.status, p).toBe(200);
+      expect(res.headers.get("cache-control"), p).toBe("no-store, must-revalidate");
+    }
+  });
+
+  it("leaves fonts and icons cacheable", async () => {
+    const res = await fetch(`${base}/mc/icon-192.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBeNull();
+  });
+
   it("keeps serving after a directory request (the process must survive)", async () => {
     await fetch(`${base}/mc`).catch(() => undefined);
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);
+  });
+});
+
+describe("default dashboard (web.dashboard)", () => {
+  let tempDir: string;
+  let stopServer: () => void;
+  let base: string;
+
+  const start = async (dashboard?: "classic" | "mc") => {
+    tempDir = join(tmpdir(), "theoffice-dash-test-" + Math.random().toString(36).slice(2));
+    mkdirSync(join(tempDir, "store"), { recursive: true });
+    writeFileSync(join(tempDir, "store", ".dashboard-token"), MOCK_TOKEN);
+    const port = await freePort();
+    base = `http://127.0.0.1:${port}`;
+    const cfg: any = {
+      web: { host: "127.0.0.1", port, ...(dashboard ? { dashboard } : {}) },
+      paths: { dashboardTokenFile: join(tempDir, "store", ".dashboard-token") },
+      owner: { timezone: "UTC" },
+      channel: { provider: "none" },
+    };
+    stopServer = startServer(cfg);
+    await new Promise((r) => setTimeout(r, 100));
+  };
+
+  afterEach(() => {
+    if (stopServer) stopServer();
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("serves the classic UI at / by default", async () => {
+    await start();
+    const res = await fetch(`${base}/`, { redirect: "manual" });
+    expect(res.status).toBe(200);
+  });
+
+  it("redirects / to Mission Control when web.dashboard is 'mc'", async () => {
+    await start("mc");
+    for (const p of ["/", "/index.html"]) {
+      const res = await fetch(`${base}${p}`, { redirect: "manual" });
+      expect(res.status, p).toBe(302);
+      expect(res.headers.get("location"), p).toBe("/mc/");
+    }
+    expect((await fetch(`${base}/mc/`)).status).toBe(200);
   });
 });
 
