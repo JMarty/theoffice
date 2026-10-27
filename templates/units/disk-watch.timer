@@ -1,0 +1,8 @@
+[Unit]
+Description=Run disk-watch every 15 minutes
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=900
+AccuracySec=30
+[Install]
+WantedBy=timers.target

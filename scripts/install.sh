@@ -221,7 +221,7 @@ EOF
 # templates/units/*.service|timer carry @ROOT@ (engine checkout), @TENANT@ and @TZ@; rendered into the user unit dir.
 # OFFICE_WATCHDOGS=core (default: the detect-only reliability set) | all (also backup, offsite push, embed, oomwatch, modal sweeper) | none
 WATCHDOGS="${OFFICE_WATCHDOGS:-core}"
-CORE_TIMERS="service-health owner-watchdog owner-ack-guard drift-detect context-watchdog frozen-pane-alarm"
+CORE_TIMERS="service-health owner-watchdog owner-ack-guard drift-detect context-watchdog frozen-pane-alarm disk-watch"
 if [ "$WATCHDOGS" != "none" ] && [ -d "$INSTALL_DIR/templates/units" ]; then
   say "Installing watchdog units ($WATCHDOGS)"
   mkdir -p "$TENANT_ROOT/tools"
