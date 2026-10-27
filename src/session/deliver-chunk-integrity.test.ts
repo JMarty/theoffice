@@ -260,7 +260,7 @@ describe("pre-send guard must ask PROVABLE EMPTINESS, not the classifier (Michae
 });
 
 /**
- * Ported from the parallel fork (fork-agent, 9027d63) during the 2026-08-03 consolidation.
+ * Ported from the parallel fork (Fork-agent, 9027d63) during the 2026-08-03 consolidation.
  *
  * Our abort path was already the stricter one — it clears the draft and VERIFIES the box is empty,
  * distinguishing send-failed from dirty-pane. What it lacked was a retry: a chunk rejected because

@@ -1,8 +1,8 @@
 # watchd — the fleet trigger service
 
 Kills the agent-as-babysitter anti-pattern (FLEET RULE 1). Born from the
-2026-07-30 incident: Dwight pinned his own session for ~90 min polling the car
-tracker boolean and went deaf to the owner + scheduled tasks. No agent should
+incident in which an agent pinned its own session for ~90 min polling a status
+flag and went deaf to the owner + scheduled tasks. No agent should
 ever sit in a foreground "check every N seconds until X" loop. Watching is
 infra's job; only the *reaction* needs an agent.
 
@@ -42,7 +42,7 @@ trivially inspectable and survives a service restart on disk.
 ```jsonc
 {
   "id": "tracker-recovered",          // unique; must equal the filename stem
-  "owner_agent": "dwight",                // registrant; default wake target
+  "owner_agent": "home-agent",                // registrant; default wake target
   "description": "wake me when the tracker modem reconnects",
   "check": {                              // POLL-type only
     "type": "http",                       // http | shell | file_mtime
@@ -99,7 +99,7 @@ just slower. On expiry: deregister and (optional) notify the owner it expired
   `store/watches/quarantine/` and logged** — it never crashes the loop or takes
   the service down. Every per-file parse is isolated in try/except.
 - The bearer for the POST is read from `$OFFICE_TENANT_ROOT/store/.dashboard-token`
-  (perms `600`, owner `owner`); it is never logged.
+  (perms `600`, owner `<engine user>`); it is never logged.
 
 ### 4. Auditability
 watchd writes `$OFFICE_TENANT_ROOT/store/watchd-status.json` every loop: for each

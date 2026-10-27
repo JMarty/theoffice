@@ -9,6 +9,7 @@ import {
   checkTaskConfigNoHardcodedAgent,
   validateShippedPromptLayer,
   TENANT_IDENTIFIERS,
+  tenantIdentifiers,
 } from "./prompt-invariants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -20,17 +21,17 @@ describe("shipped prompt-layer invariants (issue #21 §4b)", () => {
     expect(validateShippedPromptLayer(repoRoot)).toEqual([]);
   });
 
-  it("the denylist actually contains the identifiers that leaked before (marveen, the owner)", async () => {
+  it("the denylist actually contains the identifiers that leaked before (marveen and the configured owner name)", async () => {
     // guards against someone gutting the denylist and making the portability gate vacuous
     expect(TENANT_IDENTIFIERS).toContain("marveen");
-    expect(TENANT_IDENTIFIERS).toContain("the owner");
+    expect(tenantIdentifiers()).toContain("Casey");
   });
 });
 
 // --- Red-first unit coverage: every checker must CATCH its violation (so the gate above has teeth). ---
 describe("checkTenantLeaks", () => {
   it("flags the owner name (word-boundary, case-insensitive)", async () => {
-    expect(checkTenantLeaks("x", "report to owner when done").length).toBe(1);
+    expect(checkTenantLeaks("x", "report to casey when done").length).toBe(1);
   });
   it("flags an agent-id literal", async () => {
     expect(checkTenantLeaks("x", "run this as marveen").some((i) => /marveen/.test(i.message))).toBe(true);
@@ -98,6 +99,13 @@ vi.mock("../memory/recall.js", () => ({
   recallForPromptAsync: async (...a: unknown[]) => (() => h.mem)(...(a as [])),
 }));
 import { firstMessagePreamble, goalsForPrompt } from "../session/goals.js";
+
+// deterministic config: the owner is "Casey" here, whatever the real tenant is
+vi.mock("../config.js", async (orig) => {
+  const m = await orig<typeof import("../config.js")>();
+  return { ...m, loadConfig: () => { const c = m.loadConfig(); return { ...c, owner: { ...c.owner, displayName: "Casey", handle: undefined }, tenantIdentifiers: undefined }; } };
+});
+
 
 describe("shipped GOALS.md.example — preamble budget lock", () => {
   const examplePath = join(repoRoot, "tenant", "GOALS.md.example");

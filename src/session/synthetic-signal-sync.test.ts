@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { REPO_ROOT } from "../config.js";
+
+const TENANT = process.env.OFFICE_TENANT_ROOT ?? join(REPO_ROOT, "tenant");
 import { SYNTHETIC_SIGNAL_USERS } from "./delivery.js";
 
 // The synthetic-signal exclusion set (ocr-signal / bill-signal / archive-signal) is duplicated across
@@ -12,8 +16,8 @@ import { SYNTHETIC_SIGNAL_USERS } from "./delivery.js";
 // the test skips (nothing to compare). On the dev/prod box where the files exist and get edited, it
 // enforces exact equality with SYNTHETIC_SIGNAL_USERS.
 const GUARDS = [
-  "/opt/claude/theoffice/tenant/agents/darryl/tools/drift-detector/drift_detect.py",
-  "/opt/claude/theoffice/tenant/agents/marveen/hooks/office-say-stop-guard.py",
+  join(REPO_ROOT, "tools", "drift-detector", "drift_detect.py"),
+  join(TENANT, "agents", "marveen", "hooks", "office-say-stop-guard.py"),
 ];
 
 // Extract every `NOT IN ('a','b',...)` clause's quoted set from a .py source.

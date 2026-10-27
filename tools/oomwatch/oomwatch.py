@@ -10,8 +10,8 @@ WHY THIS EXISTS
     between reads: whenever we next read, the increment is still there. So detection is
     authoritative regardless of timing.
 
-    2026-08-04 — NEW AXIS. the owner had to manually reboot the hypervisor host: our container filled the
-    host's 4GB swap and a camera system (on the host, not our container) starved. earlyoom + the oom_kill
+    SWAP AXIS. A container that fills the host's swap can starve other services on the host and force
+    a manual host reboot. earlyoom + the oom_kill
     watch are both blind to this: the kernel avoids the low-free-RAM number by SWAPPING, so the
     host thrashes while free RAM inside the container still looks fine. memory.swap.current is
     the gauge nothing watched. We now also NOTIFY when container swap crosses a threshold. The
@@ -20,7 +20,7 @@ WHY THIS EXISTS
     additionally SHED ollama as a SECONDARY, edge-triggered action — it frees ~1.3GB RAM and so
     relieves pressure, but it does NOT reclaim the swap that tripped the wire (Linux swaps pages
     back only when TOUCHED, not on free RAM), so it is never the fix, only relief. There is no
-    host swap cap (the owner ruled it out 08-04), so this in-container wire is the ONLY guard on the
+    host swap cap in this deployment, so this in-container wire is the ONLY guard on the
     swap axis.
 
 DESIGN (FLEET RULE 1 — infra does the watching; this is a tiny 64MB-capped daemon, NOT an agent
@@ -276,12 +276,12 @@ def fire_swap(cur_mib: int, action_note: str, heartbeat_n: int) -> None:
         else "SWAP-GROWTH TRIPWIRE (fresh crossing)"
     content = (
         "%s (push): container memory.swap.current is %d MiB, over the %d MiB threshold "
-        "(avail RAM %s%%). This is the axis that starved the host camera system on 2026-08-04 — the host thrashes "
+        "(avail RAM %s%%). This axis can starve the host — it thrashes "
         "on swap while free RAM inside the container still looks fine, so earlyoom + the oom_kill watch "
         "are both blind to it. SECONDARY ACTION: %s. TRIAGE: post-#1 ollama holds ~0 swap "
         "(MemorySwapMax=0), so this growth is AGENT/misc pages — find it via per-process VmSwap in "
-        "/proc/*/status. There is NO host swap cap (the owner ruled it out 08-04), so nothing stops "
-        "container swap reaching the full host-backed 4 GB — the path that forced the manual reboot. "
+        "/proc/*/status. There is NO host swap cap here, so nothing stops "
+        "container swap reaching the full host-backed 4 GB — the path that can force a manual host reboot. "
         # CORRECTED 2026-09-27: this asserted "does NOT pull these pages back" as fact. MEASURED on
         # 2026-09-27: the shed ran and swap fell 2519 -> 2028 MiB, ~490 MiB back. Whether the shed
         # reclaimed it or something else did is NOT established - so the alert now reports the

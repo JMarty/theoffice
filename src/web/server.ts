@@ -100,7 +100,7 @@ const logger = log("web");
 const HERE = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = join(HERE, "..", "..", "web-ui");
 const BOOT_MS = Date.now(); // for the "since restart" usage window
-// Soft ceiling for codex agents: the codex runtime shares the owner's single ChatGPT (Plus) usage cap,
+// Soft ceiling for codex agents: the codex runtime shares the owner's single ChatGPT (consumer plan) usage cap,
 // so more than this many concurrent codex agents will hit the rolling 5h limit and stall. UI warns past it.
 const MAX_CODEX_AGENTS = 2;
 
@@ -727,13 +727,13 @@ async function handleApi(
         else delete meta.model;
       }
       writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-      // GUARDRAIL (ChatGPT Plus, no Pro): the codex runtime shares the owner's single ChatGPT usage cap,
+      // GUARDRAIL (consumer ChatGPT plan): the codex runtime shares the owner's single ChatGPT usage cap,
       // so >2 concurrent codex agents will hit the 5h limit and stall the fleet. Soft-warn (never block) so
       // the switch can't trap the owner — just surfaces the risk in the UI when the ceiling is crossed.
       const codexCount = loadAgents(cfg).filter((a) => a.runtime === "codex").length;
       const warning =
         rv === "codex" && codexCount > MAX_CODEX_AGENTS
-          ? `${codexCount} agents now on codex. ChatGPT Plus shares one usage cap — >${MAX_CODEX_AGENTS} concurrent codex agents will hit the 5h limit and stall. Consider keeping it to ${MAX_CODEX_AGENTS}.`
+          ? `${codexCount} agents now on codex. A consumer ChatGPT plan shares one usage cap — >${MAX_CODEX_AGENTS} concurrent codex agents will hit the 5h limit and stall. Consider keeping it to ${MAX_CODEX_AGENTS}.`
           : undefined;
       killSession(cfg.tmux.socket, session); // restart so the new runtime path takes effect
       relaunch();

@@ -20,7 +20,7 @@
 - Never `killSession` on a model or effort change — that is the context loss this work removes.
 - Tests run with `npx vitest run <path>`; typecheck with `npm run typecheck`.
 - Commit messages follow the repo's conventional style, e.g. `feat(session): ...`, `fix(web): ...`, `test(session): ...`.
-- Do NOT edit anything under `tenant/` — that is the owner's live data (agent-b's stale Gemini label is explicitly out of scope).
+- Do NOT edit anything under `tenant/` — that is the owner's live data (Agent-b's stale Gemini label is explicitly out of scope).
 
 ---
 
@@ -1122,7 +1122,7 @@ let RUNTIMES = [{ id: "claude", label: "Claude Code", models: [], efforts: [] }]
 - [ ] **Step 5: Verify in the real dashboard**
 
 Run: `npm run build && systemctl --user restart theoffice.service`
-Then open `http://127.0.0.1:3430/mc/` and confirm: Claude agents show an effort dropdown, agent-b (gemini) does not, and switching a Claude agent's effort does NOT clear its pane.
+Then open `http://127.0.0.1:3430/mc/` and confirm: Claude agents show an effort dropdown, Agent-b (gemini) does not, and switching a Claude agent's effort does NOT clear its pane.
 
 - [ ] **Step 6: Commit**
 
