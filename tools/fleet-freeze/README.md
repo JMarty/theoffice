@@ -13,5 +13,6 @@ Slack eats a leading slash as a client slash command, so `/freeze` and `/unfreez
 State: `GET /api/fleet/freeze`.
 
 Install: `python3 tools/fleet-freeze/install_hook.py` (idempotent, `--remove` restores). Claude Code reads hooks at session start, so agents pick it up on their next (re)start: restart the fleet once. The hook lives in the shared `~/.claude/settings.json`, so it also freezes the owner's own Claude Code CLI; thaw from a plain terminal.
+Residual risk of the office-say allowance: it trusts the NAME `office-say` as resolved through PATH (`~/.local/bin`, same unix user), so an agent that replaced that file BEFORE a freeze could make it do more; comparing the file hash in the hook would close it. A dashboard Unfreeze relies on the Cloudflare Access session (730 h by default): a stolen owner token is replayable until it expires, the Slack DM sent on every thaw is the control, and a shorter Access session (24 h to 7 d) is the owner's call.
 Not covered: a process an agent already started in the background, a leaked credential used off the machine, anyone with a shell on the box. Agents on another machine do not see this machine's file.
 Tests: `python3 -m unittest discover -s tools/fleet-freeze -p 'test_*.py'`, `npx vitest run src/fleet`.
