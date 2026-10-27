@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, closeDb, getDb } from "../db/index.js";
+import { ownerHandle } from "./owner-cards.js";
 import {
   createCard,
   getCard,
@@ -82,19 +83,19 @@ describe("1. create() validation", () => {
 describe("2. owner comments", () => {
   it("owner comment on an open card moves it to answered", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "owner", text: "answer", tray: "now" });
+    const r = addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     expect(r.ok).toBe(true);
     expect(getCard(id)!.card.status).toBe("answered");
   });
   it("owner comment without tray -> 400", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "owner", text: "answer" } as any);
+    const r = addComment(id, { author: ownerHandle(), text: "answer" } as any);
     expect(r.ok).toBe(false);
     expect(r.code).toBe(400);
   });
   it("text > 10000 chars -> 400", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "owner", text: "x".repeat(10001), tray: "now" });
+    const r = addComment(id, { author: ownerHandle(), text: "x".repeat(10001), tray: "now" });
     expect(r.ok).toBe(false);
     expect(r.code).toBe(400);
   });
@@ -106,15 +107,15 @@ describe("3. send('now') bundling", () => {
     const c2 = mkCard("cfo", { title: "cfo card two" });
     const p1 = mkCard("pam", { title: "pam card" });
     const bigText = "y".repeat(5000);
-    addComment(c1, { author: "owner", text: "short answer one", tray: "now" });
-    addComment(c2, { author: "owner", text: bigText, tray: "now" });
-    addComment(p1, { author: "owner", text: "pam answer", tray: "now" });
+    addComment(c1, { author: ownerHandle(), text: "short answer one", tray: "now" });
+    addComment(c2, { author: ownerHandle(), text: bigText, tray: "now" });
+    addComment(p1, { author: ownerHandle(), text: "pam answer", tray: "now" });
 
     const res = sendTray("now");
     expect(res.sent).toBe(3);
     expect(res.agents).toBe(2);
 
-    const msgs = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='owner-board'`).all() as any[];
+    const msgs = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='${ownerHandle()}-board'`).all() as any[];
     expect(msgs.length).toBe(2);
     const cfoMsg = msgs.find((m) => m.to_agent === "cfo")!;
     expect(cfoMsg).toBeTruthy();
@@ -130,8 +131,8 @@ describe("3. send('now') bundling", () => {
 describe("4. send() respects tray", () => {
   it("send('now') ignores batch comments and vice versa", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "owner", text: "now-answer", tray: "now" });
-    addComment(id, { author: "owner", text: "batch-answer", tray: "batch" });
+    addComment(id, { author: ownerHandle(), text: "now-answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "batch-answer", tray: "batch" });
 
     const now = sendTray("now");
     expect(now.sent).toBe(1);
@@ -156,7 +157,7 @@ describe("5. drop", () => {
 
     const res = sendTray("now");
     expect(res.sent).toBe(1);
-    const msg = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='owner-board'`).get() as any;
+    const msg = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='${ownerHandle()}-board'`).get() as any;
     expect(msg.content).toContain("DROPPED");
 
     expect(getCard(id)!.card.status).toBe("dropped");
@@ -176,8 +177,8 @@ describe("7. per-agent send failure isolation", () => {
   it("a throwing send for one agent leaves its comments unsent + card answered, still sends others", () => {
     const cfoId = mkCard("cfo");
     const pamId = mkCard("pam");
-    addComment(cfoId, { author: "owner", text: "to cfo", tray: "now" });
-    addComment(pamId, { author: "owner", text: "to pam", tray: "now" });
+    addComment(cfoId, { author: ownerHandle(), text: "to cfo", tray: "now" });
+    addComment(pamId, { author: ownerHandle(), text: "to pam", tray: "now" });
 
     const res = sendTray("now", {
       send: (from, to, content) => {
@@ -199,7 +200,7 @@ describe("7. per-agent send failure isolation", () => {
 describe("8. agent comments and needs_you", () => {
   it("needs_you=1 on a sent card -> open; without it -> unchanged", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "owner", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     sendTray("now");
     expect(getCard(id)!.card.status).toBe("sent");
 
@@ -216,7 +217,7 @@ describe("8. agent comments and needs_you", () => {
 describe("9. PATCH an already-sent comment", () => {
   it("-> 409", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "owner", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     const comment = getDb().prepare(`SELECT id FROM owner_card_comments WHERE card_id=?`).get(id) as any;
     sendTray("now");
     const r = patchComment(comment.id, { text: "edited" });
@@ -225,7 +226,7 @@ describe("9. PATCH an already-sent comment", () => {
   });
   it("allows editing an unsent comment", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "owner", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     const comment = getDb().prepare(`SELECT id FROM owner_card_comments WHERE card_id=?`).get(id) as any;
     const r = patchComment(comment.id, { text: "edited", tray: "batch" });
     expect(r.ok).toBe(true);
@@ -273,9 +274,9 @@ describe("12. migration of old owner cards", () => {
     const ins = db.prepare(
       `INSERT INTO kanban_cards (id, title, description, status, assignee, archived_at) VALUES (?, ?, ?, ?, ?, ?)`
     );
-    ins.run("k1", "live planned for owner", "d1", "planned", "owner", null);
-    ins.run("k2", "done for owner", "d2", "done", "owner", null);
-    ins.run("k3", "archived waiting for owner", "d3", "waiting", "owner", Math.floor(Date.now() / 1000));
+    ins.run("k1", "live planned for owner", "d1", "planned", ownerHandle(), null);
+    ins.run("k2", "done for owner", "d2", "done", ownerHandle(), null);
+    ins.run("k3", "archived waiting for owner", "d3", "waiting", ownerHandle(), Math.floor(Date.now() / 1000));
     ins.run("k4", "darryl's own card", "d4", "planned", "darryl", null);
     const kanbanCountBefore = (db.prepare(`SELECT COUNT(*) n FROM kanban_cards`).get() as any).n;
 

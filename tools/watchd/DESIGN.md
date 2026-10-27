@@ -41,9 +41,9 @@ trivially inspectable and survives a service restart on disk.
 
 ```jsonc
 {
-  "id": "car-tracker-recovered",          // unique; must equal the filename stem
+  "id": "tracker-recovered",          // unique; must equal the filename stem
   "owner_agent": "dwight",                // registrant; default wake target
-  "description": "wake me when the car modem reconnects",
+  "description": "wake me when the tracker modem reconnects",
   "check": {                              // POLL-type only
     "type": "http",                       // http | shell | file_mtime
     // http:      { "url":..., "expect_status":200, "expect_body_contains":"..." }
@@ -56,7 +56,7 @@ trivially inspectable and survives a service restart on disk.
   "cadence": { "interval_sec": 300,       // default 300; MIN enforced (see below)
                "backoff": { "factor": 2, "max_sec": 3600 } },
   "on_fire": { "to": "dwight",            // defaults to owner_agent
-               "content": "car recovered: {result}" },
+               "content": "Tracker recovered: {result}" },
   "repeat": "once",                       // once | always
   "expires_at": 1785700000,               // MANDATORY (defaulted if omitted)
   "created_at": 1785445000

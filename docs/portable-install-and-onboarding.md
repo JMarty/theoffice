@@ -18,7 +18,7 @@ is merely the first capability to use B. Ships to origin.
 **watchd.service.template** replaces the hardcoded .service (the wart). Tokens:
 `Environment=OFFICE_TENANT_ROOT=@OFFICE_TENANT_ROOT@`, `ExecStart=@PYTHON@ @REPO_ROOT@/tools/watchd/watchd.py`. Keeps MemoryHigh/Max caps + Restart=always. The old watchd.service (hardcoded /opt/claude/theoffice) is DELETED.
 
-**watchd.py**: `WATCHD_API_BASE` default → `http://127.0.0.1:3430` (watchd runs on the same box as the dashboard, so loopback is universally correct). Keep the env override. Do NOT ship our LAN IP (192.0.2.1) as a default — our tenant sets it via env only if ever needed (it isn't; the HA-push case that motivated it was dropped). The tenant-specific car CHECK script keeps its tracker IP — it is tenant config, not shipped framework.
+**watchd.py**: `WATCHD_API_BASE` default → `http://127.0.0.1:3430` (watchd runs on the same box as the dashboard, so loopback is universally correct). Keep the env override. Do NOT ship our LAN IP as a default — our tenant sets it via env only if ever needed (it isn't; the HA-push case that motivated it was dropped).
 
 ## PART B — generic post-update setup notice (the real ask)
 

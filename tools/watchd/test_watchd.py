@@ -19,13 +19,13 @@ DAY = 86_400.0
 
 def base_watch(**over):
     w = {
-        "id": "car-tracker-recovered",
+        "id": "tracker-recovered",
         "owner_agent": "dwight",
-        "description": "wake me when the car modem reconnects",
+        "description": "wake me when the tracker modem reconnects",
         "check": {"type": "http", "url": "http://localhost:8082/x", "expect_body_contains": "valid"},
         "fire_when": "match",
         "cadence": {"interval_sec": 300},
-        "on_fire": {"content": "car recovered: {result}"},
+        "on_fire": {"content": "Tracker recovered: {result}"},
         "repeat": "once",
         "expires_at": NOW + 2 * DAY,
         "created_at": NOW,

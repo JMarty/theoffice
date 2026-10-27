@@ -11,7 +11,7 @@ WHY THIS EXISTS
     authoritative regardless of timing.
 
     2026-08-04 — NEW AXIS. the owner had to manually reboot the hypervisor host: our container filled the
-    host's 4GB swap and camera system (on the host, not our container) starved. earlyoom + the oom_kill
+    host's 4GB swap and a camera system (on the host, not our container) starved. earlyoom + the oom_kill
     watch are both blind to this: the kernel avoids the low-free-RAM number by SWAPPING, so the
     host thrashes while free RAM inside the container still looks fine. memory.swap.current is
     the gauge nothing watched. We now also NOTIFY when container swap crosses a threshold. The
@@ -276,7 +276,7 @@ def fire_swap(cur_mib: int, action_note: str, heartbeat_n: int) -> None:
         else "SWAP-GROWTH TRIPWIRE (fresh crossing)"
     content = (
         "%s (push): container memory.swap.current is %d MiB, over the %d MiB threshold "
-        "(avail RAM %s%%). This is the axis that starved camera system on 2026-08-04 — the host thrashes "
+        "(avail RAM %s%%). This is the axis that starved the host camera system on 2026-08-04 — the host thrashes "
         "on swap while free RAM inside the container still looks fine, so earlyoom + the oom_kill watch "
         "are both blind to it. SECONDARY ACTION: %s. TRIAGE: post-#1 ollama holds ~0 swap "
         "(MemorySwapMax=0), so this growth is AGENT/misc pages — find it via per-process VmSwap in "

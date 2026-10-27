@@ -26,7 +26,7 @@ fi
 
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TENANT_ROOT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
-TZ_VALUE="${OFFICE_TZ:-Europe/Budapest}"
+TZ_VALUE="${OFFICE_TZ:-UTC}"
 SOCKET="${OFFICE_TMUX_SOCKET:-theoffice}"
 UNIT_DIR="$HOME/.config/systemd/user"
 USER_NAME="$(id -un)"  # reliable even when $USER is unset (fresh/headless env)

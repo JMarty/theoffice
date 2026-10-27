@@ -511,7 +511,7 @@ async function handleApi(
     const raw = await readBody(req, res); if (raw === null) return;
     const b = parseJson(raw);
     if (!b?.agentId || !b?.content) return json(res, 400, { error: "agentId and content required" });
-    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Budapest" });
+    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: cfg.owner.timezone });
     const r = db.prepare(`INSERT INTO daily_logs (agent_id, date, content) VALUES (?, ?, ?)`).run(b.agentId, date, b.content);
     return json(res, 200, { id: Number(r.lastInsertRowid) });
   }
@@ -688,7 +688,7 @@ async function handleApi(
       // It tells the agent to write HANDOFF.md, waits, restarts it via this same API,
       // then tells it to re-read the handoff and office-say the owner a summary.
       try {
-        spawn("python3", ["/opt/claude/theoffice/tenant/agents/darryl/tools/clean-reset/clean_reset.py", id],
+        spawn("python3", [cfg.cleanResetScript ?? join(cfg.paths.tenantRoot, "tools", "clean-reset", "clean_reset.py"), id],
           { detached: true, stdio: "ignore" }).unref();
       } catch { /* best-effort */ }
       return json(res, 200, { ok: true, action, note: "handoff + reset started; Slack summary in a few minutes" });

@@ -509,7 +509,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   // The STARTUP bypass-permissions disclaimer — a fresh install (or an un-seeded new key) wedges here.
   // It carries no idle footer (state=unknown) and uses DIFFERENT wording from a mid-session approval, so
   // without explicit detection a wedged agent reads as plain "unknown" (silent): the deliverer never fires
-  // and the owner DM sits in inbound_queue at attempts 0. This is the foreign-install-install failure mode.
+  // and the owner DM sits in inbound_queue at attempts 0. This is the foreign-install failure mode.
   const BYPASS_DISCLAIMER = pane(
     "  WARNING: Claude Code running in Bypass Permissions mode",
     "  Claude Code will not ask before running potentially dangerous commands.",

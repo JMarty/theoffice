@@ -6,7 +6,7 @@ import { loadScheduledTasks } from "./index.js";
 
 /**
  * Portability lock for the shipped kanban-grooming default (issue #21 §2 fast-follow). The template must
- * NOT hardcode a tenant-specific agent: on a foreign install (JMarty, the lawyer fleet) a literal
+ * NOT hardcode a tenant-specific agent: on a foreign install (a foreign install) a literal
  * "marveen" doesn't exist and the seeded task silently enqueues to nobody. The fix is to OMIT `agent` so
  * the loader's `tc.agent ?? cfg.mainAgentId` fallback targets whatever the install's main agent is. This
  * test loads the ACTUAL shipped template and asserts it resolves to the tenant's mainAgentId, not a literal.

@@ -9,7 +9,7 @@
 ## Tünet
 
 A gép bekapcsolása után a The Office **nem indul el magától**. A service-ek csak
-akkor jönnek fel, amikor a `marty` user **interaktívan belép** (login/SSH).
+akkor jönnek fel, amikor a `<user>` user **interaktívan belép** (login/SSH).
 Headless boot, reboot vagy "csak bekapcsolom és nem lépek be" esetén a dashboard,
 a Slack ingest, a scheduler és a bus nem futnak.
 
@@ -101,10 +101,10 @@ systemctl --user status theoffice.service       # Active since ≈ boot ideje, n
 Ha most kell, hogy menjen, kézzel elég egyszer:
 
 ```bash
-sudo loginctl enable-linger marty
-loginctl show-user marty | grep Linger          # Linger=yes
+sudo loginctl enable-linger <user>
+loginctl show-user <user> | grep Linger          # Linger=yes
 ```
 
-> Ez a `marty` userön **már be van kapcsolva** (`Linger=yes`, 2026-06-10).
+> Ez a `<user>` userön be lehet kapcsolni (`Linger=yes`).
 > A fenti telepítő-javítás a jövőbeli / másik gépre szóló telepítésekre kell,
 > hogy ne forduljon elő újra.

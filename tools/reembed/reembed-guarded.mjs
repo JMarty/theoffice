@@ -3,7 +3,7 @@
  * Guarded re-embed driver — capacity guard around the EXISTING backfillEmbeddings().
  *
  * WHY THIS EXISTS. On 2026-08-03 this container filled the hypervisor host's 4GB swap and the owner had to
- * MANUALLY REBOOT the whole server; his camera system (camera system, on the host) starved. The root
+ * manually reboot the whole server; a camera system on the host starved. The root
  * cause was the embedding model going 274MB -> 1.2GB with no capacity review. Re-embedding 3046
  * rows is a sustained burst of exactly that workload, so this guard is the thing standing between
  * him and a second manual reboot. It is not paperwork.
@@ -71,7 +71,7 @@ const MAX_STUCK_MS = arg("--max-stuck", 20 * 60 * 1000);   // CONSECUTIVE no-pro
 const PILOT = arg("--pilot", 0); // stop after N rows, for the measured pilot
 
 // HARD WALL-CLOCK DEADLINE. The morning briefing does NOT fire at a fixed hour: morning-briefing-arm
-// runs at 06:00, reads the owner's next phone alarm from HA, and rewrites the briefing cron to
+// runs at 06:00, reads the owner's next alarm from HA, and rewrites the briefing cron to
 // alarm+30min (sanity floor 06:30, fallback 07:30). So the briefing can land as early as 06:30 and
 // we cannot know when until 06:00. If this job is still saturating ollama then, briefing recalls
 // queue behind our embeds and the hybrid path silently degrades to keyword-only — a quietly worse
