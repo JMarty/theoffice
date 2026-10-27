@@ -788,7 +788,7 @@ async function handleApi(
     const was = freezeState(cfg).frozen;
     const s = freezeFleet(cfg, typeof b.reason === "string" && b.reason.trim() ? b.reason.trim() : "no reason given", by);
     if (!was && cfg.owner.slackUserId) {
-      enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet FROZEN by ${by}: ${s.reason}. No agent can run a tool and no scheduled work starts. Reply "unfreeze fleet" to thaw.`);
+      enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet FROZEN by ${by}: ${s.reason}. No Claude agent can run a tool, no new message is delivered and no scheduled work starts (an agent on another runtime, e.g. codex, finishes its current turn). Reply "unfreeze fleet" to thaw.`);
     }
     return json(res, 200, s);
   }

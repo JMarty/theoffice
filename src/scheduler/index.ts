@@ -211,24 +211,47 @@ export function catchUpMissed(cfg: EngineConfig, nowMs: number): number {
   return fired;
 }
 
+/**
+ * One scheduler tick. While the fleet is frozen NOTHING happens, and the catch-up watermark (last_tick) deliberately stays put, so an occurrence
+ * that came due during the freeze is not lost: on the first tick after the thaw catchUpMissed runs once (it fires only the latest missed
+ * occurrence per task, within its 6 h window) before the regular cadence resumes.
+ */
+export function schedulerTick(cfg: EngineConfig, nowMs: number, st: { wasFrozen: boolean }): void {
+  if (isFrozen(cfg)) {
+    st.wasFrozen = true;
+    return;
+  }
+  if (st.wasFrozen) {
+    st.wasFrozen = false;
+    const n = catchUpMissed(cfg, nowMs);
+    logger.warn({ caughtUp: n }, "fleet thawed: scheduler caught up occurrences missed during the freeze");
+  }
+  retryDeferred(cfg, nowMs);
+  fireDueTasks(cfg, nowMs);
+  sweepUnfinished(cfg, nowMs);
+  setLastTick(nowMs); // advance the catch-up watermark each live tick
+}
+
 export function startScheduler(cfg: EngineConfig): () => void {
   let stopped = false;
-  // Fire anything missed while the engine was down, BEFORE starting the regular cadence.
-  try {
-    const n = catchUpMissed(cfg, Date.now());
-    if (n > 0) logger.warn({ caughtUp: n }, "scheduler boot catch-up");
-  } catch (err) {
-    logger.error({ err }, "scheduler catch-up error");
+  const st = { wasFrozen: isFrozen(cfg) };
+  if (!st.wasFrozen) {
+    // Fire anything missed while the engine was down, BEFORE starting the regular cadence.
+    try {
+      const n = catchUpMissed(cfg, Date.now());
+      if (n > 0) logger.warn({ caughtUp: n }, "scheduler boot catch-up");
+    } catch (err) {
+      logger.error({ err }, "scheduler catch-up error");
+    }
+    setLastTick(Date.now());
+  } else {
+    logger.warn("scheduler started while the fleet is FROZEN: nothing fires, the catch-up watermark is kept for the thaw");
   }
-  setLastTick(Date.now());
 
   const tick = () => {
     if (stopped) return;
     try {
-      retryDeferred(cfg, Date.now());
-      fireDueTasks(cfg, Date.now());
-      sweepUnfinished(cfg, Date.now());
-      setLastTick(Date.now()); // advance the catch-up watermark each live tick
+      schedulerTick(cfg, Date.now(), st);
     } catch (err) {
       logger.error({ err }, "scheduler tick error");
     }

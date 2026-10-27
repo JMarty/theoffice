@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EngineConfig } from "../types.js";
 import { openDb, closeDb, getDb } from "../db/index.js";
 import { listQueued } from "../queue/index.js";
-import { fireDueTasks, catchUpMissed, sweepUnfinished, retryDeferred, _deferredCountForTest, _clearDeferredForTest } from "./index.js";
+import { fireDueTasks, catchUpMissed, sweepUnfinished, retryDeferred, schedulerTick, _deferredCountForTest, _clearDeferredForTest } from "./index.js";
 import { lastOccurrenceBefore } from "./cron.js";
 
 let root: string;
@@ -263,6 +263,34 @@ describe("quota guard wiring", () => {
     getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
     getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
     expect(fireDueTasks(mkCfg(undefined), T + 180_000)).toBe(3);
+  });
+});
+
+describe("freeze does not lose scheduled work", () => {
+  const getTick = () => (getDb().prepare(`SELECT v FROM scheduler_state WHERE k='last_tick'`).get() as { v: number } | undefined)?.v;
+  const setTick = (ms: number) => getDb().prepare(`INSERT INTO scheduler_state (k, v) VALUES ('last_tick', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(ms);
+
+  it("frozen ticks leave the watermark alone; the first tick after the thaw catches up the missed occurrence and resumes", async () => {
+    const { mkdtempSync: mk, rmSync: rm } = await import("node:fs");
+    const { freezeFleet, unfreezeFleet } = await import("../fleet/freeze.js");
+    const sdir = mk(join(tmpdir(), "office-frz2-"));
+    const fcfg = { ...cfg, paths: { ...cfg.paths, storeDir: sdir } } as EngineConfig;
+    const T0 = Date.parse("2026-06-26T08:00:00Z");
+    setTick(T0);
+    const st = { wasFrozen: false };
+    freezeFleet(fcfg, "test", "toby");
+    schedulerTick(fcfg, T0 + 5 * 60_000, st);
+    schedulerTick(fcfg, T0 + 10 * 60_000, st);
+    expect(getTick()).toBe(T0); // NOT advanced: the freeze window stays open for the catch-up
+    expect(st.wasFrozen).toBe(true);
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs WHERE name='every-minute'`).get() as { n: number }).n;
+    unfreezeFleet(fcfg);
+    schedulerTick(fcfg, T0 + 11 * 60_000, st);
+    expect(st.wasFrozen).toBe(false);
+    const after = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs WHERE name='every-minute'`).get() as { n: number }).n;
+    expect(after).toBeGreaterThan(before + 1); // the missed occurrence (catch-up) AND the current minute
+    expect(getTick()).toBe(T0 + 11 * 60_000); // watermark moves again
+    rm(sdir, { recursive: true, force: true });
   });
 });
 

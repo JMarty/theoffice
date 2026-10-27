@@ -59,8 +59,9 @@ export function unfreezeFleet(cfg: EngineConfig): boolean {
 
 /**
  * The owner's own Slack phrasings. Deliberately strict: a whole-message command, so chat that merely mentions freezing ("can you
- * unfreeze the budget?") never triggers it. Accepts "/freeze [reason]", "!freeze [reason]", "freeze fleet [reason]" and the unfreeze
- * equivalents ("/unfreeze", "!unfreeze", "unfreeze fleet").
+ * unfreeze the budget?") never triggers it. The working phrases are "freeze fleet [reason]", "!freeze [reason]", "unfreeze fleet" and "!unfreeze".
+ * Slack's own client eats a leading slash ("/freeze" is treated as a slash command and never sent), so "/freeze" and "/unfreeze" are only
+ * accepted for clients or bots that do deliver them; do not rely on them.
  */
 export function parseOwnerFreezeCommand(text: string): { action: "freeze"; reason: string } | { action: "unfreeze" } | null {
   const t = text.trim();
@@ -82,7 +83,7 @@ export function handleOwnerFreezeCommand(cfg: EngineConfig, text: string, sender
   if (!cmd) return null;
   if (cmd.action === "freeze") {
     const s = freezeFleet(cfg, cmd.reason, "owner");
-    return `Fleet frozen: no agent can run a tool and no scheduled work starts. Reason: ${s.reason}. Reply "unfreeze fleet" to thaw.`;
+    return `Fleet frozen: no Claude agent can run a tool, no new message is delivered and no scheduled work starts (an agent on another runtime, e.g. codex, finishes its current turn). Reason: ${s.reason}. Reply "unfreeze fleet" to thaw.`;
   }
   return unfreezeFleet(cfg) ? "Fleet thawed: agents can work again, queued messages are being delivered." : "The fleet was not frozen.";
 }

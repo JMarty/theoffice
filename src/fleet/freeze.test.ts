@@ -76,7 +76,8 @@ describe("handleOwnerFreezeCommand (the Slack path)", () => {
 
   it("the owner can freeze and thaw, and gets a reply to send", () => {
     const c = ownerCfg();
-    expect(handleOwnerFreezeCommand(c, "/freeze runaway mailer", "UOWNER")).toContain("runaway mailer");
+    expect(handleOwnerFreezeCommand(c, "freeze fleet runaway mailer", "UOWNER")).toContain("runaway mailer");
+    expect(handleOwnerFreezeCommand(c, "freeze fleet x", "UOWNER")).toContain("codex"); // honest about runtimes the hook cannot stop
     expect(isFrozen(c)).toBe(true);
     expect(freezeState(c)).toMatchObject({ by: "owner" });
     expect(handleOwnerFreezeCommand(c, "unfreeze fleet", "UOWNER")).toContain("thawed");
