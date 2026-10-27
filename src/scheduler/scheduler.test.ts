@@ -263,6 +263,9 @@ describe("quota guard wiring", () => {
     getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
     getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
     expect(fireDueTasks(mkCfg(undefined), T + 180_000)).toBe(3);
+  });
+});
+
 describe("fleet freeze wiring", () => {
   it("while frozen the scheduler fires nothing, catches up nothing, retries nothing and alarms nothing", async () => {
     const { mkdtempSync: mk, rmSync: rm } = await import("node:fs");
