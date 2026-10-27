@@ -39,7 +39,14 @@ async function post(path, body) {
 }
 
 // ---------------- reconnecting (engine restart) ----------------
-let RECONNECTING = false, RC_TIMER = null, RC_DELAY = 2000;
+let RECONNECTING = false, RC_TIMER = null, RC_DELAY = 2000, USAGE_AT = 0;
+// A visible "loading" state from the first moment: the page used to stay completely blank until the first API round trip finished (10+ s when the engine was busy).
+function setLoading(on) {
+  const screen = $("#reconnect-screen"); if (!screen) return;
+  const msg = screen.querySelector(".rc-msg"), sub = $("#rc-sub");
+  if (on) { if (msg) msg.textContent = "Loading Mission Control…"; if (sub) sub.textContent = "Connecting to the engine. This can take a few seconds when it is busy."; screen.classList.remove("hidden"); }
+  else { screen.classList.add("hidden"); if (msg) msg.textContent = "Reconnecting to the engine…"; if (sub) sub.textContent = "It is restarting or unreachable. This page retries by itself."; }
+}
 function setReconnecting(on, firstLoad) {
   RECONNECTING = on;
   const bar = $("#reconnect-bar"), screen = $("#reconnect-screen");
@@ -194,7 +201,11 @@ function activityCopy(a, st) {
 
 async function refreshData() {
   // /api/usage is the slow call (transcript scan, ~10 s cold): it must NOT hold up the first paint, so it is fetched on the side and fills in when it arrives
-  api("/api/usage?window=24h").then((u) => { USAGE = Object.fromEntries((u.usage || []).map((x) => [x.id, x])); if (CONNECTED) { renderStrip(); if (CURRENT_TAB === "agents") showTab("agents"); } }).catch(() => {});
+  // ...and only every 5 minutes: on an engine that still computes it synchronously, a 15 s poll per open tab kept the whole API blocked ~2/3 of the time.
+  if (Date.now() - USAGE_AT > 300000) {
+    USAGE_AT = Date.now();
+    setTimeout(() => api("/api/usage?window=24h").then((u) => { USAGE = Object.fromEntries((u.usage || []).map((x) => [x.id, x])); if (CONNECTED) { renderStrip(); if (CURRENT_TAB === "agents") showTab("agents"); } }).catch(() => { USAGE_AT = 0; }), 3000);
+  }
   const [agents, overview, host, schedules, runtimes, auth, freeze] = await Promise.all([
     api("/api/agents"),
     api("/api/overview").catch(() => ({})),
@@ -1128,6 +1139,7 @@ function showGate(msg) {
   if (msg) $("#gate-err").textContent = msg;
 }
 async function connect() {
+  if (!RECONNECTING) setLoading(true);
   try {
     // Single auth probe FIRST: a wrong token costs exactly one rate-limit strike,
     // not a burst (refreshData fans out to several parallel calls, which would otherwise
@@ -1136,12 +1148,14 @@ async function connect() {
     await refreshData();
     CONNECTED = true;
     setReconnecting(false);
+    setLoading(false);
     $("#gate").classList.add("hidden");
     $("#app").classList.remove("hidden");
     renderHeader(); renderFreezeBanner(); renderAuthBanner(); renderStrip(); renderTabs();
     await showTab(CURRENT_TAB);
   } catch (e) {
-    if (e instanceof NetError) { setReconnecting(true, true); scheduleRetry(connect); return; } // engine restarting: no token gate, no blank page
+    if (e instanceof NetError) { setLoading(false); setReconnecting(true, true); scheduleRetry(connect); return; } // engine restarting: no token gate, no blank page
+    setLoading(false);
     showGate(e.message);
   }
 }
