@@ -16,5 +16,23 @@ class Order(unittest.TestCase):
         self.assertEqual(rr.order(["c", "a", "b"], []), ["a", "b", "c"])
 
 
+
+class FreezeAbort(unittest.TestCase):
+    def test_frozen_detects_the_freeze_file(self):
+        import os
+        import tempfile
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "store"))
+        old = rr.TENANT
+        rr.TENANT = d
+        try:
+            self.assertFalse(rr.frozen())
+            open(os.path.join(d, "store", "fleet-freeze.json"), "w").write("{}")
+            self.assertTrue(rr.frozen())
+            self.assertEqual(rr.main(["--only", "x"]), 3)  # aborts before touching any agent
+        finally:
+            rr.TENANT = old
+
+
 if __name__ == "__main__":
     unittest.main()

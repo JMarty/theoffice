@@ -35,6 +35,11 @@ def session_up(agent):
     return subprocess.run(["tmux", "-L", SOCK, "has-session", "-t", f"agent-{agent}"], capture_output=True, timeout=10).returncode == 0
 
 
+def frozen():
+    """A fleet freeze is on: a reset would restart agents the owner just froze, and a frozen agent cannot write its handoff. Abort instead."""
+    return os.path.exists(os.path.join(TENANT, "store", "fleet-freeze.json"))
+
+
 def log(msg):
     line = f"{datetime.datetime.now():%F %T} {msg}"
     print(line, flush=True)
@@ -57,8 +62,14 @@ def main(argv):
     log(f"rolling reset plan: {' -> '.join(seq)}")
     if a.dry_run:
         return 0
+    if frozen():
+        log("ABORT: the fleet is frozen (store/fleet-freeze.json exists); nothing was reset")
+        return 3
     env = {**os.environ, "NO_SUMMARY": "1", "OFFICE_TENANT_ROOT": TENANT}
     for n, agent in enumerate(seq, 1):
+        if frozen():
+            log(f"ABORT before {agent}: the fleet was frozen during the run; the remaining agents were not reset")
+            return 3
         log(f"[{n}/{len(seq)}] {agent}: clean reset start")
         t0 = time.time()
         r = subprocess.run([sys.executable, os.path.join(HERE, "clean_reset.py"), agent], env=env)
