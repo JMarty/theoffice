@@ -1,0 +1,12 @@
+[Unit]
+Description=frozen-pane-alarm — DETECT-ONLY alarm for panes parked on a modal and for owner messages queued too long. Sends NO keystrokes: cannot select Upgrade (money) and cannot clear a permission prompt (authorisation). Darryl owns the separate dismiss-sweeper; this is the safe half, shipped first.
+[Service]
+Environment=TZ=@TZ@
+Type=oneshot
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+# 2026-08-04: without this the unit runs in UTC while the whole fleet runs in the owner timezone, so every
+# log line was stamped 2h early. The alarm LOGIC was unaffected (cooldown and the 15-min threshold
+# both use epoch seconds), but the log is what a human reads to rebuild an incident timeline under
+# pressure — and a timestamp that is confidently wrong about when is the same failure this alarm exists to catch.
+ExecStart=/usr/bin/bash @ROOT@/tools/frozen-pane-alarm/frozen-pane-alarm.sh
+Nice=19

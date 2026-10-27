@@ -1,0 +1,9 @@
+[Unit]
+Description=Auto-compact context watchdog: /compact any idle agent that crosses 85% context, before it drifts into office-say failure.
+
+[Service]
+Environment=TZ=@TZ@
+Type=oneshot
+ExecStart=/usr/bin/python3 @ROOT@/tools/context-watchdog/context_watchdog.py
+StandardOutput=append:@TENANT@/store/context-watchdog.log
+StandardError=append:@TENANT@/store/context-watchdog.log

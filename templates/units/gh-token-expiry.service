@@ -1,0 +1,26 @@
+[Unit]
+Description=Warn before the git credential-helper GitHub PAT expires
+
+[Service]
+Type=oneshot
+# exit 1 = the check RAN and found an approaching expiry. That is a finding, not a fault.
+# Without this, systemd reports the unit as failed every day the warning is live, which makes
+# 'the check found something' indistinguishable from 'the check broke' -- the same conflation
+# the briefing-board refusal log has between a 422 health deny and a 400 validation reject.
+# exit 2 (expired / unreadable / did not authenticate) stays a REAL failure.
+SuccessExitStatus=1
+# EIGHTH DEFECT (2026-09-24): the unit set only NOTIFY, so OFFICE_TENANT_ROOT was EMPTY under systemd,
+# the notify guard's path resolved to "/store/.dashboard-token", the test failed, and the scheduled run
+# silently skipped notification -- armed, firing, logging, reaching nobody. Exactly the finding cfo
+# raised, reintroduced by me. My hand-runs all worked because MY shell exports it: the bug lived in the
+# ENVIRONMENT difference, which no self-chosen input could reach. A unit must declare every variable
+# its program reads.
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+Environment=NOTIFY=marveen
+# WARN_DAYS deliberately NOT set here (2026-09-26). It used to pin 2, which SILENTLY OVERRODE the
+# script's default -- so raising that default from 2 to 7 in the script would have changed nothing when
+# the TIMER ran, and every hand test would still have passed because a shell supplies the script default.
+# Two places holding one number is the defect; the script owns it now, with its reasoning next to it.
+ExecStart=@ROOT@/tools/gh-token-expiry-check/gh-token-expiry-check
+StandardOutput=append:@TENANT@/store/gh-token-expiry.log
+StandardError=append:@TENANT@/store/gh-token-expiry.log

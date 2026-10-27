@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the usage-limit modal sweeper every 20s (interim stopgap, Toby can kill on sight)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=20s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

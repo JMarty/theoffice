@@ -1,0 +1,18 @@
+[Unit]
+Description=Daily semantic-memory vectorize (embed NULL memories via ollama; bge-m3 unloads ~5m after)
+Documentation=https://github.com/owner/theoffice
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+# The tested entrypoint: tsx src/memory/embed-cli.ts backfill over ALL NULL/wrong-dim rows,
+# non-interactive, exit 0 only on full coverage. A run while ollama is down embeds nothing and
+# exits non-zero (visible as a failed run) but loses nothing — the NULLs wait for the next run.
+ExecStart=/usr/bin/npm run --silent memory:backfill
+# The .last-backfill-ok success marker is written by embed-cli itself (on a fully-successful run, timer OR
+# manual), not here — a single source, so a manual `npm run memory:backfill` also refreshes it and the
+# health check never has two writers to reconcile.
+TimeoutStartSec=1800

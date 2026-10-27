@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly encrypted data backup to the owner's Google Drive (14 daily + 8 weekly), status in store/backup.json
+
+[Service]
+Type=oneshot
+EnvironmentFile=-@TENANT@/backup.env
+ExecStart=/usr/bin/python3 @ROOT@/tools/backup/backup_drive.py
+TimeoutStartSec=3000

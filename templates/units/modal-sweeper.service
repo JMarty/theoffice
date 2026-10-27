@@ -1,0 +1,15 @@
+# modal-sweeper — interim usage-limit modal dismisser (Darryl, 2026-08-04). Decoupled stopgap for the
+# delivery outage; the real fix is the in-engine patch under Toby's gate. Structurally cannot select
+# Upgrade (only presses Enter when the cursor is provably on Stop-and-wait). Zero engine side effects.
+# Install:  systemctl --user daemon-reload && systemctl --user enable --now modal-sweeper.timer
+# Rollback: systemctl --user disable --now modal-sweeper.timer   (one command; kills it on sight)
+[Unit]
+Description=modal-sweeper — dismiss the Claude usage-limit modal (interim stopgap, select Stop-and-wait only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+ExecStart=/usr/bin/python3 @ROOT@/tools/modal-sweeper/modal_sweeper.py
+MemoryHigh=32M
+MemoryMax=64M

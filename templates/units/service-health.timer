@@ -1,0 +1,8 @@
+[Unit]
+Description=Run service-health producer every 5 min (interval_s=300) so checked_at stays within the briefing's 2x-interval staleness gate.
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=300
+AccuracySec=15
+[Install]
+WantedBy=timers.target

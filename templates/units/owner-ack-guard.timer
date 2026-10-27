@@ -1,0 +1,11 @@
+[Unit]
+Description=Run owner-ack-guard every 30s (fast owner-ack gap catch, tighter than drift-detector/owner-watchdog)
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=30s
+AccuracySec=10s
+Unit=owner-ack-guard.service
+
+[Install]
+WantedBy=timers.target
