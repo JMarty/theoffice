@@ -16,7 +16,9 @@ def apply(settings, root, remove=False):
     stop = s.setdefault("hooks", {}).setdefault("Stop", [])
     stop[:] = [g for g in stop if not any(MARK in (h.get("command") or "") for h in g.get("hooks", []))]
     if not remove:
-        stop.append({"hooks": [{"type": "command", "command": f"python3 {os.path.join(root, 'tools', 'reply-guard', 'reply_guard.py')} hook", "timeout": 10}]})
+        # sh prefilter: every agent runs this at every Stop, only the main agent needs python
+        guard = os.path.join(root, "tools", "reply-guard", "reply_guard.py")
+        stop.append({"hooks": [{"type": "command", "command": f"sh -c '[ \"$OFFICE_AGENT_ID\" = \"${{REPLY_GUARD_AGENT:-marveen}}\" ] || exit 0; exec python3 {guard} hook'", "timeout": 10}]})
     if not stop:
         del s["hooks"]["Stop"]
     if not s["hooks"]:

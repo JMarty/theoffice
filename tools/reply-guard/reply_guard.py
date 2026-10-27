@@ -9,6 +9,7 @@ Scope and safety:
   - owner closers ("ok", "thanks", an emoji) need no reply: the same strict classifier as owner-ack-guard (a "?" is never a closer);
   - never loops: when Claude Code reports stop_hook_active the stop is always allowed, so at most ONE block per stop;
   - any error, unreadable transcript or garbled input = allow (fail open);
+  - while the fleet is FROZEN (store/fleet-freeze.json) it always allows: the freeze hook denies every tool, including office-say, so demanding a send would only waste a loop;
   - mode file store/reply-guard.mode: "log" (default) records what it WOULD block and blocks nothing; "enforce" blocks. Log lines never contain message text.
 owner-ack-guard and owner-watchdog stay as the backstop for the case this hook cannot see.
 
@@ -122,6 +123,8 @@ def hook_main(stdin, stdout, env=os.environ, store=STORE, mode=None):
         payload = json.load(stdin)
         if env.get("OFFICE_AGENT_ID", "") != env.get("REPLY_GUARD_AGENT", "marveen"):
             return 0
+        if os.path.exists(os.path.join(store, "fleet-freeze.json")):
+            return 0  # frozen: no tool can run, a reminder to send could not be obeyed
         entries = _load(payload["transcript_path"])
         r = evaluate(entries, bool(payload.get("stop_hook_active")))
     except Exception:

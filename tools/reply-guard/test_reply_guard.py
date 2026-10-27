@@ -113,6 +113,14 @@ class Hook(unittest.TestCase):
         self.assertEqual(rec["would"], "block")
         self.assertNotIn("status?", json.dumps(rec))
 
+    def test_while_the_fleet_is_frozen_the_guard_always_allows(self):
+        open(os.path.join(self.d, "fleet-freeze.json"), "w").write("{}")
+        self.assertEqual(self.run_hook(), (0, ""))
+        self.assertEqual(self.run_hook(mode="log"), (0, ""))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "reply-guard.log.jsonl")))  # not even logged as a would-block
+        os.remove(os.path.join(self.d, "fleet-freeze.json"))
+        self.assertEqual(json.loads(self.run_hook()[1])["decision"], "block")  # thawed: guards again
+
     def test_second_stop_in_the_same_turn_passes(self):
         self.assertEqual(self.run_hook(active=True), (0, ""))
 
@@ -151,6 +159,7 @@ class Install(unittest.TestCase):
         self.assertEqual(once, ih.apply(once, "/e"))
         self.assertEqual(len(once["hooks"]["Stop"]), 2)
         self.assertIn("/e/tools/reply-guard/reply_guard.py hook", json.dumps(once))
+        self.assertIn("sh -c", once["hooks"]["Stop"][1]["hooks"][0]["command"])  # prefilter: non-main agents never start python
         self.assertEqual(once["hooks"]["PreToolUse"], cur["hooks"]["PreToolUse"])
         self.assertEqual(ih.apply(once, "/e", remove=True), cur)
 

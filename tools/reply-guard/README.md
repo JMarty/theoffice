@@ -8,5 +8,7 @@ If the turn that is ending answered an owner Slack message ("[Slack message from
 - `python3 install_hook.py` adds the Stop hook (idempotent, `--remove`, backup). Sessions read hooks at start: restart the main agent once.
 - owner-ack-guard and owner-watchdog stay as the backstop for what this hook cannot see.
 
-Known blind spots: a turn ended by context compaction is not a Stop; two owner messages queued in one turn are judged by the last one.
+While the fleet is frozen (`store/fleet-freeze.json`) the guard always allows (the freeze hook denies office-say too).
+Known blind spots: a turn ended by context compaction is not a Stop; two owner messages queued in one turn are judged by the last one; a reply sent by a spawned subagent or background task is not in the main transcript (a false block: one extra prompt); any Bash command mentioning office-say counts as answered (the safe direction).
+Before enforce: read a week of `store/reply-guard.log.jsonl` and list every would-block with its follow-up.
 Tests: `python3 -m unittest discover -s tools/reply-guard -p 'test_*.py'`
