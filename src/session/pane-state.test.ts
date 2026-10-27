@@ -128,7 +128,7 @@ describe("shouldRetrySubmit / decideSubmitFollowup", () => {
 });
 
 /**
- * : dwight + marveen went silent ~20 min. The delivery worker typed each owner message in but
+ * Two agents went silent for minutes. The delivery worker typed each owner message in but
  * the submit Enter was dropped; the message sat parked, yet the confirm loop marked it DELIVERED. Root
  * cause: "done" was returned whenever the payload was not VISIBLY parked — and a TALL parked payload
  * pushes the input box's top separator off
@@ -194,7 +194,7 @@ describe("submit-confirm requires positive proof (2026-08-04 strand regression)"
   it("FAST-TURN RACE: turn ends before the poll, busy never sampled -> still done, no retry", () => {
     // The false-NEGATIVE twin of the strand: a short turn submits AND finishes before the ~1s confirm
     // sample, so the busy frame is never observed. Keying on busy ALONE would conclude not-delivered and
-    // re-Enter, double-submitting (the identical duplicate Michael received). The composer-cleared branch
+    // re-Enter, double-submitting (an identical duplicate message). The composer-cleared branch
     // is the load-bearing proof here: payload gone from the box == submitted, even with no busy seen.
     expect(submitConfirmed(ghost)).toBe(true); // busy absent, composer cleared to a dim ghost hint
     expect(submitConfirmed(clean)).toBe(true); // busy absent, composer plainly empty

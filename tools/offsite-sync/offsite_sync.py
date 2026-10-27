@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nightly off-box code sync (owner: 'it can't live on our server only'). For every own git repo under the engine root (plus config extra_roots):
+"""Nightly off-box code sync (design rule: the code must not live only on one server). For every own git repo under the engine root (plus config extra_roots):
 push all local branches to origin (fast-forward or new only, NEVER force, never to other remotes), secret-scan before pushing, then write store/offsite-code.json
 (checked_at, repos[], problems[]) for the morning briefing and tell marveen on the bus ONLY if something is wrong (no remote, failed/held push, unpushed commits older than 24 h).
 Token: one-shot http.extraheader, never stored in a remote URL."""

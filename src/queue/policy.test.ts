@@ -49,12 +49,12 @@ describe("isStaleDroppableHeartbeat", () => {
 
 describe("ownerDropAlarmText", () => {
   it("names the agent, the reason and the attempt budget, and quotes a preview", () => {
-    const txt = ownerDropAlarmText("marveen", "dirty-pane", "The reviewer has not answered me for 30 minutes");
+    const txt = ownerDropAlarmText("marveen", "dirty-pane", "No answer from the reviewer for 30 minutes");
     expect(txt).toContain("*marveen*");
     expect(txt).toContain("dirty-pane");
     expect(txt).toContain(String(MAX_DELIVERY_ATTEMPTS));
     expect(txt).toContain("re-send");
-    expect(txt).toContain("The reviewer has not answered me for 30 minutes");
+    expect(txt).toContain("No answer from the reviewer for 30 minutes");
   });
   it("flattens whitespace and truncates a long message with an ellipsis", () => {
     const long = "word ".repeat(100).trim(); // 500 chars, all one line after flattening
@@ -69,13 +69,13 @@ describe("ownerDropAlarmText", () => {
 
 describe("ownerStallAlarmText — the queued-but-stuck case, worded honestly", () => {
   it("says 'not yet delivered / may be stuck', names the agent and minutes, quotes a preview", () => {
-    const txt = ownerStallAlarmText("marveen", 16, "Reviewer, status at 10:46? Nothing from you since 5:46");
+    const txt = ownerStallAlarmText("marveen", 16, "Status update please?");
     expect(txt).toContain("*marveen*");
     expect(txt).toContain("16 min");
     expect(txt).toContain("queued but not");
     expect(txt).toMatch(/stuck|not yet/i);
     expect(txt).not.toMatch(/dropped|could not deliver/i); // NOT a confirmed drop — it may still land
-    expect(txt).toContain("Reviewer, status at 10:46");
+    expect(txt).toContain("Status update please?");
   });
 });
 

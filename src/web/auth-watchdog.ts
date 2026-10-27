@@ -31,10 +31,9 @@ const REALERT_MS_URGENT = 60 * 60 * 1000;
 
 /**
  * Repeat reminders about the SAME unchanged expiring-soon warning are capped at two a day, in these
- * local hours. The owner asked for this on 2026-08-21, after an hourly repeat sent 14 identical DMs
- * in 13 hours, overnight included: an alert that arrives every hour stops being information and just
- * burns attention. Fixed LOCAL hours, not a 24h timer from the last send — a relative timer drifts
- * (2:57 → 2:57 the next night) and lands back in the small hours, which was the original complaint.
+ * local hours. An hourly repeat sends many identical DMs, overnight included: an alert that arrives every
+ * hour stops being information and just burns attention. Fixed LOCAL hours, not a 24h timer from the last
+ * send — a relative timer drifts and lands back in the small hours.
  * Note this caps REPEATS only — see dueForAlert.
  */
 export const ALERT_HOURS: readonly number[] = [8, 20];

@@ -11,8 +11,8 @@
 //      that process can authenticate. The dashboard was fully green during a total outage.
 //   2. THE ONLY FIX NEEDED A TERMINAL. Emergency Restart cannot help: restarting a pane just makes it
 //      re-read ~/.claude/.credentials.json, so if the on-disk credential is still expired the fresh
-//      pane comes up equally dead. The owner restarted three times before the credential was renewed
-//      and reasonably concluded the button was broken. The real fix — `/login` — was terminal-only.
+//      pane comes up equally dead. Repeated restarts therefore look like a broken button. The real fix
+//      — `/login` — was terminal-only.
 //
 // So this module does three things, all reachable from a phone:
 //   - DETECT   getAuthHealth(): reads the credential AND scans the live panes for the signed-out banner.

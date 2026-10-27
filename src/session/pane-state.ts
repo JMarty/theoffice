@@ -408,8 +408,7 @@ export function shouldRetrySubmit(pane: string, payloadHint: string, opts: { min
  * function also returns false when the input box cannot be LOCATED (liveInputBoxRange === null), and the
  * box goes unlocatable exactly when a TALL parked payload pushes its top separator off the captured pane.
  * So a long owner message that never submitted (its Enter was dropped) read as delivered and the agent
- * sat silent — dwight (a message plus a `[Pasted text]` block of 8 photos) and marveen, 
- * min of owner-visible silence. This is the same "a box we cannot SEE is not proof" inversion the PRE-send
+ * sat silent for minutes of owner-visible silence. This is the same "a box we cannot SEE is not proof" inversion the PRE-send
  * gate already fixed in inputBoxProvablyEmptyStyled; the confirm side needs the mirror of it.
  *
  * Submission is proven ONLY by a positive signal: the agent has started a turn (a busy indicator is up),
@@ -448,8 +447,8 @@ export function safeToResubmit(pane: string): boolean {
  * placeholder, the agent is NOT working (idle footer, no busy signal). detectPaneState reads this pane as
  * "busy" (a pending paste never auto-submits), so the deliverer gates shut behind it, and the only Enter
  * that was ever going to submit it belonged to the delivery that has already given up. Nothing else
- * presses it: on toby sat deaf from 08:27 to 14:02 and darryl from 08:25 until a human pressed
- * Enter (2h15), each behind one such placeholder, while the bus queued everything behind them.
+ * presses it: an agent can sit deaf for hours behind one such placeholder until a human presses
+ * Enter, while the bus queues everything behind it.
  *
  * Pure and deliberately narrow: idle footer present, NO busy indicator, and the placeholder is inside the
  * LIVE input box (a pane that merely quotes "[Pasted text #1" in its scrollback, as a tool result can,

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ALERT_HOURS, alertSlot, dueForAlert, dueForSeverity } from "./auth-watchdog.js";
 
 /**
- * These guard the 2026-08-21 incident: an unchanged "expiring-soon" credential produced 14 identical
- * DMs in 13 hours because the only gate was a one-hour timer. The owner asked for two a day.
+ * These guard against an unchanged "expiring-soon" credential producing many identical DMs because the
+ * only gate was a one-hour timer. The cap is two a day.
  */
 describe("alertSlot", () => {
   it("names one window per reminder hour", () => {
@@ -63,7 +63,7 @@ describe("dueForAlert", () => {
 });
 
 /**
- * These guard the 2026-08-26 merge, where two independent fixes for the same problem were combined:
+ * These guard a merge where two independent fixes for the same problem were combined:
  * upstream split the cadence by severity, this branch capped repeats to two fixed local windows.
  * The resolution keeps BOTH — hourly for hard-down, windows for expiring-soon — and that decision
  * lives in dueForSeverity. Nothing covered it until these tests: the suite was green while the one

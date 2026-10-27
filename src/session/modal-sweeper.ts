@@ -1,4 +1,4 @@
-// Session-hygiene sweeper — the periodic backstop born from the 2026-08-04 delivery outage.
+// Session-hygiene sweeper — the periodic backstop born from a delivery outage.
 //
 // Jobs the isReady-gated deliver path structurally cannot do, because a blocked pane makes the
 // deliverer bail BEFORE it can act, and because some failures never touch the deliverer at all:
@@ -64,8 +64,8 @@ function envSec(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-// A queued owner message not delivered within this many seconds is alarmed as "stuck". Well under the
-// ~3.5h the owner waited on 2026-08-04. A legitimate long turn can trip it; the alarm is worded as
+// A queued owner message not delivered within this many seconds is alarmed as "stuck". Far under the
+// hours an unnoticed stall can last. A legitimate long turn can trip it; the alarm is worded as
 // "not yet delivered / may be stuck", which is honest either way.
 const ownerStaleSec = () => envSec("OFFICE_OWNER_STALE_SEC", 15 * 60);
 // Re-alarm a STILL-stuck queued owner message on this cadence (a dropped/failed one alarms once).

@@ -44,8 +44,8 @@ export const MIGRATIONS: Migration[] = [
     name: "inbound_queue orphan tracking",
     // Orphan-requeue (kanban aba29f60). A message handed to a session that then DIES is currently lost
     // forever: 'delivered' is terminal on this table, so nothing can tell "the agent read it" from "the
-    // agent was OOM-killed three seconds later". Proven live 2026-08-01 — an owner message sat 36 minutes
-    // against a system that considered it handled.
+    // agent was OOM-killed three seconds later". The result is a user message sitting unanswered against a
+    // system that considers it handled.
     //
     // session_ref: WHICH session instance received it (tmux #{session_created}). Identity, not doneness —
     //   doneness does not exist here. NULL on every pre-existing row, which is also the gate that keeps

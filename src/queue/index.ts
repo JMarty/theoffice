@@ -48,9 +48,8 @@ export function enqueueInbound(a: EnqueueArgs): number | undefined {
 
 /**
  * Queued items in DELIVERY-PRIORITY order: owner (source='channel') messages first, everything else
- * after, FIFO (id ASC) within each class. Before 2026-08-04 this was a flat id-ASC, so a live owner
- * message queued behind stale scheduler heartbeats — including an already-moot 08:35 briefing — and
- * waited turns for them to drain. The CASE keeps the owner lane ahead without starving the rest: within
+ * after, FIFO (id ASC) within each class. A flat id-ASC would let a live owner message queue behind
+ * stale scheduler heartbeats (including an already-moot briefing) and wait turns for them to drain. The CASE keeps the owner lane ahead without starving the rest: within
  * a class it is still oldest-first. Mirrors queueSourceRank() in policy.ts (kept in sync by test).
  */
 export function listQueued(agentId?: string, limit = 50): InboundItem[] {
@@ -160,8 +159,8 @@ export interface OwnerAlarmRow {
 
 /**
  * The single STATE-OBSERVER for owner (source='channel') messages that need an alarm. Watches state, not
- * call sites, so no delivery path can forget to escalate — and it is the ONLY way to catch the case the
- * 2026-08-04 outage actually hit: messages that sit QUEUED and undelivered (parked behind a modal, never
+ * call sites, so no delivery path can forget to escalate — and it is the ONLY way to catch the case a
+ * delivery outage actually hits: messages that sit QUEUED and undelivered (parked behind a modal, never
  * attempted, so never 'failed'). Returns channel rows that are EITHER
  *   (a) status='failed' and never alarmed                         -> a hard drop, alarm once, OR
  *   (b) status='queued', queued longer than staleSec, and either  -> a stall, alarm on a slow cadence
