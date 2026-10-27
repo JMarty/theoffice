@@ -286,6 +286,12 @@ export function startServer(cfg: EngineConfig): () => void {
         return json(res, 500, { error: "server error" });
       }
     }
+    if (path === "/mc") {
+      // Mission Control lives under /mc/; the address without the slash used to answer "not found"
+      res.writeHead(302, { location: "/mc/" });
+      res.end();
+      return;
+    }
     if (cfg.web.dashboard === "mc" && (path === "/" || path === "/index.html")) {
       res.writeHead(302, { location: "/mc/" });
       res.end();
