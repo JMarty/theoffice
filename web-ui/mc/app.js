@@ -160,7 +160,7 @@ function activityCopy(a, st) {
 }
 
 async function refreshData() {
-  const [agents, overview, usage, host, schedules, runtimes, auth] = await Promise.all([
+  const [agents, overview, usage, host, schedules, runtimes, auth, freeze] = await Promise.all([
     api("/api/agents"),
     api("/api/overview").catch(() => ({})),
     api("/api/usage?window=24h").catch(() => ({ usage: [] })),
@@ -168,8 +168,10 @@ async function refreshData() {
     api("/api/schedules").catch(() => ([])),
     api("/api/runtimes").catch(() => null),
     api("/api/auth/health").catch(() => null),
+    api("/api/fleet/freeze").catch(() => null),
   ]);
   if (auth) AUTH = auth;
+  if (freeze) FREEZE = freeze;
   AGENTLIST = agents;
   AGENTS = Object.fromEntries(agents.map((a) => [a.id, a]));
   OVERVIEW = overview || {};
@@ -194,6 +196,50 @@ function seg(group, opts) {
   return `<div class="seg">` + opts.map(([v, l]) =>
     `<button class="${PREFS[group] === v ? "active" : ""}" onclick="setPref('${group}','${v}')">${l}</button>`).join("") + `</div>`;
 }
+// ---------------- fleet freeze (the red button) ----------------
+// Anyone on the dashboard can FREEZE. Only the OWNER can thaw: the Unfreeze button sends NO bearer token, only the Cloudflare Access login of the
+// owner (the request must come through the office.* address, signed in with the owner's email); agents hold the bearer but never that login.
+let FREEZE = { frozen: false };
+function fmtFreezeSince(at) { return at ? new Date(at * 1000).toLocaleString() : ""; }
+function renderFreezeBanner() {
+  const host = $("#freeze-banner");
+  if (!host) return;
+  if (!FREEZE || !FREEZE.frozen) { host.innerHTML = ""; host.style.display = "none"; return; }
+  host.style.display = "block";
+  host.innerHTML = `
+    <div style="background:#7f1d1d;border:1px solid #dc2626;border-radius:12px;padding:12px 14px;margin:0 0 12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:#fff">
+      <div style="font-size:20px;line-height:1">🛑</div>
+      <div style="flex:1;min-width:220px">
+        <div style="font-weight:800;font-size:14px">FLEET FROZEN: no Claude agent can run a tool, nothing new is delivered, no scheduled work starts</div>
+        <div style="font-size:12px;opacity:.9;margin-top:2px">${esc(FREEZE.reason || "")}${FREEZE.by ? " · by " + esc(FREEZE.by) : ""}${FREEZE.at ? " · since " + esc(fmtFreezeSince(FREEZE.at)) : ""}</div>
+      </div>
+      <button onclick="unfreezeFleet(this)" style="background:#fff;color:#111;border:0;border-radius:9px;padding:10px 14px;font-weight:800;font-size:13px;cursor:pointer">▶ Unfreeze (owner)</button>
+    </div>`;
+}
+async function refreshFreeze() {
+  try { FREEZE = await api("/api/fleet/freeze"); } catch (e) { /* keep the last known state */ }
+  renderFreezeBanner();
+}
+async function freezeFleet(btn) {
+  const reason = prompt("Freeze the whole fleet?\n\nNo Claude agent can run a tool, nothing new is delivered and no scheduled work starts until the owner unfreezes.\n\nReason (optional):");
+  if (reason === null) return;
+  btn.disabled = true;
+  try { await post("/api/fleet/freeze", { reason: reason.trim() || "frozen from the dashboard", actor: "dashboard" }); } catch (e) { alert("Freeze failed: " + e.message); }
+  btn.disabled = false;
+  await refreshFreeze();
+}
+async function unfreezeFleet(btn) {
+  btn.disabled = true;
+  try {
+    // credentials: include so the Cloudflare Access cookie goes along; deliberately NO Authorization header (the bearer is not accepted here)
+    const r = await fetch("/api/fleet/unfreeze", { method: "POST", credentials: "include" });
+    if (r.status === 403) alert("Only the owner can unfreeze, signed in through Cloudflare Access.\n\nOpen this dashboard at its office.* address and sign in with the owner email, or send 'unfreeze fleet' to an agent on Slack.");
+    else if (!r.ok) alert("Unfreeze failed (" + r.status + ")");
+  } catch (e) { alert("Unfreeze failed: " + e.message); }
+  btn.disabled = false;
+  await refreshFreeze();
+}
+
 function renderHeader() {
   $("#hwrap").innerHTML = `
     <div class="brand">
@@ -201,6 +247,10 @@ function renderHeader() {
       <div class="wordmark"><div class="t1">The Office</div><div class="t2">Mission Control</div></div>
     </div>
     <div class="controls">
+      <button id="freeze-btn" onclick="freezeFleet(this)" title="Freeze the fleet: no agent runs a tool, nothing new is delivered, no scheduled work starts. Only the owner can unfreeze"
+              style="flex:0 0 auto;background:#111827;color:#fff;border:1px solid #dc2626;border-radius:9px;padding:9px 13px;font-weight:800;font-size:13px;cursor:pointer">
+        🛑 Freeze fleet
+      </button>
       <button id="emergency-btn" onclick="emergencyRestart(this)" title="Save the whole queue, wipe it, restart every agent, and have Michael brief you"
               style="flex:0 0 auto;background:#dc2626;color:#fff;border:0;border-radius:9px;padding:9px 13px;
                      font-weight:800;font-size:13px;letter-spacing:.2px;cursor:pointer;box-shadow:0 1px 0 rgba(0,0,0,.25)">
@@ -1018,6 +1068,7 @@ function tick() {
 }
 async function softRefresh() {
   await refreshData();
+  renderFreezeBanner();
   renderAuthBanner();
   renderStrip(); renderTabs();
   if (CURRENT_TAB === "agents") await showTab("agents");
@@ -1047,7 +1098,7 @@ async function connect() {
     CONNECTED = true;
     $("#gate").classList.add("hidden");
     $("#app").classList.remove("hidden");
-    renderHeader(); renderAuthBanner(); renderStrip(); renderTabs();
+    renderHeader(); renderFreezeBanner(); renderAuthBanner(); renderStrip(); renderTabs();
     await showTab(CURRENT_TAB);
   } catch (e) {
     showGate(e.message);

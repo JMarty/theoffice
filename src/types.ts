@@ -143,6 +143,12 @@ export interface WebConfig {
    */
   trustedProxyToken?: string;
   /**
+   * Cloudflare Access in front of the dashboard (via the tunnel). Needed for the dashboard Unfreeze button: the fleet can be thawed only by a request
+   * carrying a Cf-Access-Jwt-Assertion that verifies against the team keys for one of `audiences` and the owner's email (src/web/cf-access.ts).
+   * Unset = no dashboard unfreeze at all (Slack / deleting the file still work).
+   */
+  cfAccess?: { teamDomain: string; audiences: string[]; ownerEmail: string };
+  /**
    * Which dashboard `/` opens: "classic" (default) or "mc" (Mission Control, served under /mc/).
    * With "mc", `/` redirects to /mc/ and Mission Control hides its "Classic" switch link.
    */

@@ -95,7 +95,8 @@ import {
   sendTray,
 } from "./owner-cards.js";
 import { checkDoneEvidence } from "./kanban-evidence.js";
-import { freezeFleet, freezeState } from "../fleet/freeze.js";
+import { freezeFleet, freezeState, unfreezeFleet } from "../fleet/freeze.js";
+import { makeJwksProvider, verifyAccessJwt, type Jwks } from "./cf-access.js";
 import { archiveCard, cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
 import { log } from "../logger.js";
 
@@ -203,12 +204,34 @@ export function getClientIp(req: IncomingMessage, trustedProxyToken?: string): s
   return req.socket.remoteAddress || "unknown";
 }
 
+let jwksOverride: ((refresh: boolean) => Promise<Jwks | null>) | null = null;
+export const _setJwksForTest = (f: ((refresh: boolean) => Promise<Jwks | null>) | null): void => { jwksOverride = f; };
+
 export function startServer(cfg: EngineConfig): () => void {
   const token = getOrCreateToken(cfg.paths.dashboardTokenFile);
+  const jwksProvider = jwksOverride ?? (cfg.web.cfAccess ? makeJwksProvider(cfg.web.cfAccess.teamDomain) : async () => null);
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${cfg.web.host}:${cfg.web.port}`);
     const path = url.pathname;
+    // Dashboard UNFREEZE: the one route that is NOT opened by the bearer token (every agent holds it). Its only credential is a Cloudflare Access JWT
+    // for the owner's email, verified against the team keys. A bearer, a request from 127.0.0.1 or a forged header gets a plain 403 and changes nothing.
+    if (path === "/api/fleet/unfreeze" && req.method === "POST") {
+      const r = await verifyAccessJwt(
+        typeof req.headers["cf-access-jwt-assertion"] === "string" ? (req.headers["cf-access-jwt-assertion"] as string) : undefined,
+        cfg.web.cfAccess ?? { teamDomain: "", audiences: [], ownerEmail: "" },
+        _now(),
+        (refresh) => jwksProvider(refresh)
+      );
+      if (!r.ok) {
+        logger.warn({ reason: r.reason }, "dashboard unfreeze refused");
+        return json(res, 403, { error: "forbidden: unfreeze needs the owner, signed in through Cloudflare Access" });
+      }
+      const was = unfreezeFleet(cfg);
+      logger.warn({ was }, "fleet thawed from the dashboard by the owner");
+      if (was && cfg.owner.slackUserId) enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet thawed from the dashboard (${r.email}). Agents can work again.`);
+      return json(res, 200, freezeState(cfg));
+    }
     if (path.startsWith("/api/")) {
       const ip = getClientIp(req, cfg.web.trustedProxyToken);
       const rl = cfg.web.rateLimit || { maxFails: 5, windowMs: 900000, blockMs: 60000, maxBlockMs: 3600000 };
@@ -778,8 +801,9 @@ async function handleApi(
     return json(res, 200, { ok: true, id });
   }
 
-  // --- fleet freeze (the red button). Any dashboard-token holder, including an agent, may FREEZE; there is deliberately NO unfreeze route:
-  // every agent holds this token, so thawing is the owner's Slack command (src/fleet/freeze.ts) or deleting <store>/fleet-freeze.json on the box.
+  // --- fleet freeze (the red button). Any dashboard-token holder, including an agent, may FREEZE. There is no bearer-authenticated unfreeze: every agent
+  // holds this token. Thawing is the owner's Cloudflare-Access-verified dashboard button (POST /api/fleet/unfreeze, handled above the bearer gate), his
+  // Slack command (src/fleet/freeze.ts), or deleting <store>/fleet-freeze.json on the box.
   if (path === "/api/fleet/freeze" && m === "GET") return json(res, 200, freezeState(cfg));
   if (path === "/api/fleet/freeze" && m === "POST") {
     const raw = await readBody(req, res); if (raw === null) return;
