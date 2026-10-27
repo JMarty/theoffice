@@ -1,7 +1,7 @@
 # fleet freeze (the red button)
 
 While `<tenant>/store/fleet-freeze.json` exists:
-- every Claude Code agent tool call is rejected by a PreToolUse hook (`freeze-hook.sh`, matcher `*`, ~2 ms, no engine needed): no files, commands, mail or channel replies. Agents on a runtime without these hooks (codex, e.g. pete) are NOT stopped mid-turn: they finish the turn they are in, then receive nothing new;
+- every Claude Code agent tool call is rejected by a PreToolUse hook (`freeze-hook.sh`, matcher `*`, ~2 ms, no engine needed): no files, commands or mail. The one exception is an agent speaking to the owner: a plain `office-say "text"` (or a quoted-heredoc `office-say <<'EOF'`) still goes through, strictly matched by `freeze_allow.py` (no second command, pipe, redirect or substitution), so a frozen agent can tell the owner it is frozen. The freeze never touches the engine's outbound queue or `/api/outbound`. Agents on a runtime without these hooks (codex, e.g. pete) are NOT stopped mid-turn: they finish the turn they are in, then receive nothing new;
 - the engine's scheduler and deliverer stand still (queued messages keep and drain on thaw). Scheduled work that came due during the freeze is NOT lost: the catch-up watermark is kept, and the first tick after the thaw fires the latest missed occurrence per task (6 h window), like after an engine outage. The catch-up is capped at 6 h and one occurrence per task, so a freeze longer than 6 h still skips the earlier occurrences;
 - sessions and their context stay alive.
 

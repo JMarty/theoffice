@@ -85,5 +85,42 @@ class DetectorsStayQuietWhileFrozen(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.t, "store", "frozen-pane-alarm.log")))
 
 
+
+class FrozenButOwnerComms(unittest.TestCase):
+    """A freeze stops agent WORK, never the agent's voice to the owner: a plain office-say call still goes through, nothing else does."""
+
+    def run_hook(self, tool, tool_input):
+        f = os.path.join(tempfile.mkdtemp(), "fleet-freeze.json")
+        open(f, "w").write("{}")
+        return subprocess.run(["sh", HOOK, f], capture_output=True, text=True, input=json.dumps({"tool_name": tool, "tool_input": tool_input}))
+
+    def bash(self, cmd):
+        return self.run_hook("Bash", {"command": cmd}).returncode
+
+    def test_plain_office_say_forms_are_allowed_while_frozen(self):
+        for c in ['office-say "Fleet is frozen, waiting for you"', "office-say 'status: all quiet'", "office-say <<'EOF'\nline one\n`literal` $(not run) \"q\"\nEOF", "office-say  \"two spaces\"  "]:
+            self.assertEqual(self.bash(c), 0, c)
+
+    def test_anything_that_could_do_more_than_speak_is_still_denied(self):
+        bad = ['office-say "x"; rm -rf /tmp/x', 'office-say "x" && ls', 'office-say "x" | tee /tmp/f', 'office-say "$(cat /etc/passwd)"', 'office-say "`id`"', 'office-say $HOME', "office-say \"x\" > /tmp/f",
+               "office-say <<EOF\n$(id)\nEOF", "office-say <<'EOF'\nhi\nEOF\nrm -rf /tmp/x", "office-say <<'EOF'\nhi\nEOF; ls", "ls", "cat /etc/passwd", "echo office-say", "curl -s http://127.0.0.1:3430/api/fleet/freeze",
+               "office-say", "office-say --help", 'office-say "a" "b"', "env office-say 'x'", "/bin/sh -c 'office-say x'"]
+        for c in bad:
+            self.assertEqual(self.bash(c), 2, c)
+
+    def test_other_tools_are_denied_even_with_an_office_say_looking_input(self):
+        for tool in ("Read", "Edit", "Write", "WebFetch", "mcp__claude_ai_Gmail__send_message"):
+            self.assertEqual(self.run_hook(tool, {"command": 'office-say "x"'}).returncode, 2, tool)
+
+    def test_garbled_input_while_frozen_is_denied(self):
+        f = os.path.join(tempfile.mkdtemp(), "fleet-freeze.json")
+        open(f, "w").write("{}")
+        self.assertEqual(subprocess.run(["sh", HOOK, f], capture_output=True, text=True, input="not json").returncode, 2)
+
+    def test_thawed_everything_still_passes(self):
+        f = os.path.join(tempfile.mkdtemp(), "nofile.json")
+        self.assertEqual(subprocess.run(["sh", HOOK, f], capture_output=True, text=True, input='{"tool_name":"Bash","tool_input":{"command":"rm -rf x"}}').returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
