@@ -74,7 +74,7 @@ def main():
             if rt == tip: continue
             if rt and git(r, "merge-base", "--is-ancestor", tip, rt)[0] == 0: continue        # remote is ahead: nothing of ours to lose
             if rt and git(r, "merge-base", "--is-ancestor", rt, tip)[0] != 0: rec["held"].append(f"{b}: diverged from origin/{tgt}"); problems.append({"repo": r, "problem": f"branch {b} diverged from origin/{tgt}; not pushed (no force)"}); continue
-            if hold.get("all") or b in hold.get("branches", []): rec["held"].append(f"{b}: {hold['why']}"); problems.append({"repo": r, "problem": f"HELD {b}: {hold['why']}"}); continue
+            if hold.get("all") or b in hold.get("branches", []): rec["held"].append(f"{b}: {hold['why']}"); rec.setdefault("info", []).append(f"HELD {b}: {hold['why']}"); continue      # a configured hold is by design: info in the status file, not an alert
             todo.append((b, tgt))
         if todo and offsite_hooks and hasattr(offsite_hooks, "push_gate"):      # tenant gate (e.g. a PII denylist for a public repo); a failure holds the push
             ok, why = offsite_hooks.push_gate(r, [b for b, _ in todo])
