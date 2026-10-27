@@ -36,10 +36,10 @@ describe("goalsForPrompt (operator goals layer, issue #21 §3)", () => {
   });
 
   it("frames the goals under a prioritize-against header and preserves the content", async () => {
-    writeFileSync(join(root, "GOALS.md"), "- Ship the company migration\n- Owner health never slips");
+    writeFileSync(join(root, "GOALS.md"), "- Ship the migration\n- Owner health never slips");
     const out = goalsForPrompt(cfg(root));
     expect(out).toMatch(/^OPERATOR GOALS/);
-    expect(out).toContain("Ship the company migration");
+    expect(out).toContain("Ship the migration");
     expect(out).toContain("Owner health never slips");
   });
 
