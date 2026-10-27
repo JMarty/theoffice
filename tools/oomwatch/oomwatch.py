@@ -42,10 +42,12 @@ import select
 import sys
 import time
 import urllib.request
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
 CG_EVENTS = "/sys/fs/cgroup/memory.events"          # container root: aggregates every child
 CG_SWAP_CUR = "/sys/fs/cgroup/memory.swap.current"  # container root: total swap in use by us
-STATE = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant"),
+STATE = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", TENANT),
                      "store", "oomwatch.state.json")
 SWAP_SAMPLE_S = 60                                  # poll timeout == swap sample gap (monotonic oom still exact)
 RESYNC_TIMEOUT_S = 3600                             # worst-case oom re-read bound (unchanged guarantee)
@@ -137,7 +139,7 @@ def _api_base() -> str:
 
 
 def _bearer() -> str:
-    p = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant"),
+    p = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", TENANT),
                      "store", ".dashboard-token")
     try:
         return open(p).read().strip()

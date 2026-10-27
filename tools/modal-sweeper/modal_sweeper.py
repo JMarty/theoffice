@@ -58,6 +58,8 @@ Usage:
 import re
 import os
 import sys
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 import json
 import time
 import hashlib
@@ -67,7 +69,7 @@ from datetime import datetime, timezone
 
 TMUX = "/usr/bin/tmux"
 SOCKET = "theoffice"
-TENANT = os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant")
+TENANT = os.environ.get("OFFICE_TENANT_ROOT", TENANT)
 LOG = f"{TENANT}/store/modal-sweeper.log"
 STATE = f"{TENANT}/store/.modal-sweeper-alarm-state.json"
 API = "http://127.0.0.1:3430/api/messages"
@@ -259,7 +261,7 @@ def self_test() -> int:
     ])
     PERM_BASH = "\n".join([  # a command-approval gate
         "  Do you want to run this command?",
-        "     rm -rf /opt/claude/theoffice/tenant/store",
+        "     rm -rf $OFFICE_TENANT_ROOT/store",
         "   ❯ 1. Yes",
         "     2. No, and tell Claude what to do differently (esc)",
     ])

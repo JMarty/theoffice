@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # gh-token-expiry-check -- alarm BEFORE the fine-grained GitHub PAT in the git credential helper lapses.
 #
-# WHY (marveen named the prerequisite, 2026-09-24): card 7d8fcba0 wants four contact-poli clones
-# de-embedded onto ~/.config/mv2-gh/git-credentials. That helper token is fine-grained and EXPIRING
-# (2026-09-29). Wire four clones onto it with no renewal story and they all break on the same day
-# with no obvious cause, and whoever hits it debugs four repos instead of one token. So the de-embed
-# is gated on this check existing first: a security fix must not become a scheduled outage.
+# WHY: the fine-grained GitHub PAT in the git credential helper is EXPIRING. Repos wired onto it with no renewal
+# story all break on the same day with no obvious cause, and whoever hits it debugs many repos instead of one
+# token. A security fix (de-embedding tokens from remotes) must not become a scheduled outage, so this check
+# warns before the token lapses.
 #
 # Never prints the token. Read-only API call. Exit 0 ok, 1 warn, 2 expired/unreadable.
 set -uo pipefail
@@ -106,10 +105,10 @@ else
   # CORRECTED 2026-09-24 (second time): the previous text said "nothing reads this file yet
   # (credential.helper unset at every scope)". BOTH halves were wrong, and I had adopted a peer's
   # negative claim into user-facing text without checking it. ~/obsidian-vault/.git/config wires
-  # credential.helper = store --file=<this file> for github.com/owner/private-kb-repo. So a
+  # credential.helper = store --file=<this file> for github.com/<owner>/<private-kb-repo>. So a
   # lapse DOES break something. Telling a reader an expiry is harmless is the worst possible error
   # in an expiry alarm.
-  echo "  ONE known consumer: ~/obsidian-vault (private-kb-repo) authenticates via this file,"
+  echo "  ONE known consumer: ~/obsidian-vault (<private-kb-repo>) authenticates via this file,"
   echo "  so a lapse breaks its push/pull. It ALSO blocks the 7d8fcba0 de-embed plan."
   echo "  Mint a replacement into $CRED before that date."
   # PUSH THE FINDING, DO NOT JUST LOG IT (cfo, 2026-09-24): "the check is armed; the finding is not."
@@ -142,7 +141,7 @@ else
     [ -n "$prev_first" ] || prev_first="$today"
     printf '%s\n%s\n%s\n' "$n" "$prev_first" "$tok_sha8" > "$STATE" 2>/dev/null; chmod 600 "$STATE" 2>/dev/null
     if [ "$n" -eq 1 ]; then seq="FIRST notice"; else seq="notice ${n}, first sent ${prev_first} — you may have already escalated this"; fi
-    body="[${seq}] GitHub credential-helper PAT expires in ${days} day(s) (${exp}). One known consumer: ~/obsidian-vault (private-kb-repo) authenticates via this file, so a lapse breaks its push/pull; it also blocks the 7d8fcba0 de-embed. Automated daily check, no token value included. Nothing needed if a replacement has been minted. THIS ALARM STOPS BY ITSELF once the helper holds a token with more than ${WARN_DAYS} days REMAINING — that is the only condition that clears it, there is nothing to acknowledge and no other way to silence it."
+    body="[${seq}] GitHub credential-helper PAT expires in ${days} day(s) (${exp}). One known consumer: ~/obsidian-vault (<private-kb-repo>) authenticates via this file, so a lapse breaks its push/pull; it also blocks the 7d8fcba0 de-embed. Automated daily check, no token value included. Nothing needed if a replacement has been minted. THIS ALARM STOPS BY ITSELF once the helper holds a token with more than ${WARN_DAYS} days REMAINING — that is the only condition that clears it, there is nothing to acknowledge and no other way to silence it."
     printf '%s' "$body" | python3 -c '
 import json,sys,os,urllib.request
 b=sys.stdin.read()

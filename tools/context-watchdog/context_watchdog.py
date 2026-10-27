@@ -12,6 +12,8 @@ drift-detector catches the SYMPTOM (already drifted); this prevents the CAUSE.
 import subprocess, re, json, os, sys, time, glob, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from occupancy import read_transcript
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
 AGENTS = ["marveen","cfo","dwight","toby","pam","jim","pete","ryan"]  # not darryl (self)
 THRESHOLD = 85          # compact when context used >= this %
@@ -30,8 +32,8 @@ IDLE_MIN_S = 900        # idle means: no 'esc to interrupt' AND the transcript h
 # is paused, re-timed or the box is busy, and wall-clock stays honest through all of it.
 BLIND_DWELL_S = int(os.environ.get("CTX_BLIND_DWELL_S", "3600"))   # say nothing for this long, then say it once
 BLIND_REALERT_S = int(os.environ.get("CTX_BLIND_REALERT_S", "86400"))  # then at most once a day
-STATE = "/opt/claude/theoffice/tenant/store/context-watchdog-state.json"
-TOKEN = "/opt/claude/theoffice/tenant/store/.dashboard-token"
+STATE = f"{TENANT}/store/context-watchdog-state.json"
+TOKEN = f"{TENANT}/store/.dashboard-token"
 API   = "http://127.0.0.1:3430/api/messages"
 
 def pane(agent):

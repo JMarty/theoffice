@@ -9,13 +9,15 @@ Runs in the background (spawned fire-and-forget by the web action). Logs to
 clean-reset.log. Uses tmux send-keys for instructions (immediate, idle-aware).
 """
 import sys, time, subprocess, os, urllib.request, datetime
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
 AGENT = sys.argv[1] if len(sys.argv) > 1 else ""
 SOCK = "theoffice"
 SESSION = f"agent-{AGENT}"
-HANDOFF = f"/opt/claude/theoffice/tenant/agents/{AGENT}/HANDOFF.md"
-TOKEN = open("/opt/claude/theoffice/tenant/store/.dashboard-token").read().strip()
-LOG = "/opt/claude/theoffice/tenant/store/clean-reset.log"
+HANDOFF = f"{TENANT}/agents/{AGENT}/HANDOFF.md"
+TOKEN = open(f"{TENANT}/store/.dashboard-token").read().strip()
+LOG = f"{TENANT}/store/clean-reset.log"
 
 def log(msg):
     with open(LOG, "a") as f:

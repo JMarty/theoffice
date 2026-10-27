@@ -38,14 +38,16 @@ Rollback: stop/disable owner-ack-guard.timer (kills everything); owner_alarmed_a
 the slower watchdogs resume their normal role.
 """
 import argparse, json, os, sqlite3, subprocess, time, urllib.request
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
-DB          = os.environ.get("OWNER_ACK_GUARD_DB", "/opt/claude/theoffice/tenant/store/theoffice.db")
-TOKEN_FILE  = os.environ.get("OWNER_ACK_GUARD_TOKEN", "/opt/claude/theoffice/tenant/store/.dashboard-token")
+DB          = os.environ.get("OWNER_ACK_GUARD_DB", f"{TENANT}/store/theoffice.db")
+TOKEN_FILE  = os.environ.get("OWNER_ACK_GUARD_TOKEN", f"{TENANT}/store/.dashboard-token")
 PORT        = os.environ.get("OFFICE_PORT", "3430")
 FAST_SEC    = int(os.environ.get("OWNER_ACK_GUARD_FAST_SEC", "60"))     # silent this long + turn ended -> nudge
 MAX_AGE_SEC = int(os.environ.get("OWNER_ACK_GUARD_MAX_AGE_SEC", "1800")) # never first-nudge a >30m-old delivery
 AGENTS      = [a.strip() for a in os.environ.get("OWNER_ACK_GUARD_AGENTS", "marveen").split(",") if a.strip()]
-SECRETS     = os.environ.get("OWNER_ACK_GUARD_SLACK_SECRETS", "/opt/claude/theoffice/tenant/secrets/slack")
+SECRETS     = os.environ.get("OWNER_ACK_GUARD_SLACK_SECRETS", f"{TENANT}/secrets/slack")
 TMUX_SOCKET = os.environ.get("OWNER_ACK_GUARD_TMUX_SOCKET", "theoffice")
 
 # Exact-match closers that need no reply -> gentle nudge (tone only). Kept STRICT: a "?" always

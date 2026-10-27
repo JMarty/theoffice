@@ -5,10 +5,13 @@ uploads to the Drive folder named in FOLDER (drive.file token: only files this a
 (checked_at, ok, last_file, size, kept[], problems[]) and tells marveen on the bus ONLY when something is wrong.  --restore-test downloads the newest archive, decrypts to a temp dir and diffs it.
 No code or output ever prints the passphrase or a token."""
 import base64, datetime as dt, glob, hashlib, json, os, re, secrets, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.parse, urllib.request
-ROOT = "/opt/claude/theoffice/tenant"; HOME = os.path.expanduser("~"); HERE = os.path.dirname(os.path.abspath(__file__))
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
+ROOT = TENANT; HOME = os.path.expanduser("~"); HERE = os.path.dirname(os.path.abspath(__file__))
 STATUS = f"{ROOT}/store/backup.json"; PASSFILE = f"{ROOT}/secrets/backup/PASSPHRASE"; TOKFILE = os.environ.get("BACKUP_DRIVE_TOKEN") or next(iter(sorted(glob.glob(f"{ROOT}/secrets/.gmail-creds/.oauth2.drive.*.json"))), "")
-FOLDER = "Office Backups (encrypted)"; PREFIX = "office-"; SUFFIX = ".tar.gz.gpg"; KEEP_DAILY, KEEP_WEEKLY = 14, 8
-app = os.environ.get("BACKUP_APP_DATA", "")      # optional: an app data dir (db + projects + media) to include; unset = skipped
+FOLDER = os.environ.get("BACKUP_DRIVE_FOLDER", "Office Backups (encrypted)"); PREFIX = "office-"; SUFFIX = ".tar.gz.gpg"; KEEP_DAILY, KEEP_WEEKLY = 14, 8
+APP = os.environ.get("BACKUP_APP_DATA", "")      # optional: an app data dir (db + projects + media) to include; unset = skipped
+APP_DB = os.environ.get("BACKUP_APP_DB", "app.db")      # sqlite file inside the app data dir
 D1_DB = os.environ.get("BACKUP_D1_DATABASE", "")  # optional: Cloudflare D1 database name to export; unset = skipped
 D1_CONFIG = os.environ.get("BACKUP_D1_CONFIG", f"{HERE}/wrangler-prod.toml")
 problems = []
@@ -87,13 +90,13 @@ def stage(work):
         except Exception as e: problems.append(f"sqlite {os.path.basename(p)}: {type(e).__name__}")
     for p in glob.glob(f"{ROOT}/store/*.json") + glob.glob(f"{ROOT}/store/.dashboard-token"):
         if os.path.getsize(p) < 2_000_000: shutil.copy2(p, f"{S}/store/")
-    # 2 app app data (db via online backup + project files + media)
-    if app:
-      os.makedirs(f"{S}/app")
-      try: sqlite_copy(f"{app}/app.db", f"{S}/app/app.db")
+    # 2 optional app data (db via online backup + project files + media)
+    if APP:
+      os.makedirs(f"{S}/app-data")
+      try: sqlite_copy(f"{APP}/{APP_DB}", f"{S}/app-data/{APP_DB}")
       except Exception as e: problems.append(f"app.db: {type(e).__name__}")
       for sub in ("projects", "media"):
-        if os.path.isdir(f"{app}/{sub}"): shutil.copytree(f"{app}/{sub}", f"{S}/app/{sub}", symlinks=True, ignore_dangling_symlinks=True)
+        if os.path.isdir(f"{APP}/{sub}"): shutil.copytree(f"{APP}/{sub}", f"{S}/app-data/{sub}", symlinks=True, ignore_dangling_symlinks=True)
     # 3 scheduled tasks + tenant docs
     if os.path.isdir(f"{ROOT}/scheduled-tasks"): shutil.copytree(f"{ROOT}/scheduled-tasks", f"{S}/scheduled-tasks", symlinks=True)
     for p in glob.glob(f"{ROOT}/*.md"): shutil.copy2(p, f"{S}/")
@@ -128,8 +131,8 @@ def stage(work):
     shutil.copytree(f"{ROOT}/secrets", f"{S}/secrets", symlinks=True, ignore=shutil.ignore_patterns("backup"))
     # 7 optional D1 export (prod)
     if D1_DB:
-      os.makedirs(f"{S}/crm"); r = subprocess.run(["npx", "--yes", "wrangler", "d1", "export", D1_DB, "--remote", "--config", D1_CONFIG, "--output", f"{S}/crm/{D1_DB}.sql"], capture_output=True, text=True, timeout=600, cwd=HERE)
-      if r.returncode != 0 or not os.path.exists(f"{S}/crm/{D1_DB}.sql") or os.path.getsize(f"{S}/crm/{D1_DB}.sql") < 1000: problems.append("d1 export failed")
+      os.makedirs(f"{S}/db-export"); r = subprocess.run(["npx", "--yes", "wrangler", "d1", "export", D1_DB, "--remote", "--config", D1_CONFIG, "--output", f"{S}/db-export/{D1_DB}.sql"], capture_output=True, text=True, timeout=600, cwd=HERE)
+      if r.returncode != 0 or not os.path.exists(f"{S}/db-export/{D1_DB}.sql") or os.path.getsize(f"{S}/db-export/{D1_DB}.sql") < 1000: problems.append("d1 export failed")
     return S
 def fhash(p):
     h = hashlib.sha256()
@@ -186,10 +189,10 @@ def restore_test():
             if not line.strip(): continue
             d, rel = line.rstrip("\n").split("  ", 1); p = os.path.join(base, rel); n += 1
             if d != "big" and (not os.path.exists(p) or fhash(p) != d): bad += 1
-        # live check: the app db copy opens and a store db is readable
-        probe = f"{base}/app/app.db" if os.path.exists(f"{base}/app/app.db") else (sorted(glob.glob(f"{base}/store/*.db")) or [""])[0]
+        # live check: the app db copy (if any) opens, else a store db is readable
+        probe = f"{base}/app-data/{APP_DB}" if os.path.exists(f"{base}/app-data/{APP_DB}") else (sorted(glob.glob(f"{base}/store/*.db")) or [""])[0]
         c = sqlite3.connect(probe); tabs = c.execute("select count(*) from sqlite_master").fetchone()[0]; c.close()
-        print(f"restore test of {f['name']}: {n} files, {bad} mismatched, app.db tables {tabs}"); return 0 if bad == 0 and tabs > 0 else 3
+        print(f"restore test of {f['name']}: {n} files, {bad} mismatched, app db tables {tabs}"); return 0 if bad == 0 and tabs > 0 else 3
     finally: shutil.rmtree(work, ignore_errors=True)
 if __name__ == "__main__":
     if "--restore-test" in sys.argv: sys.exit(restore_test())

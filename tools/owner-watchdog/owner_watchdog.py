@@ -37,9 +37,11 @@ to keep alerts but stop auto-re-drive. Pure reader/writer of theoffice.db + the 
 no engine code, no restart.
 """
 import argparse, json, os, sqlite3, subprocess, sys, time, urllib.request
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
-DB          = os.environ.get("OWNER_WATCHDOG_DB", "/opt/claude/theoffice/tenant/store/theoffice.db")
-TOKEN_FILE  = os.environ.get("OWNER_WATCHDOG_TOKEN", "/opt/claude/theoffice/tenant/store/.dashboard-token")
+DB          = os.environ.get("OWNER_WATCHDOG_DB", f"{TENANT}/store/theoffice.db")
+TOKEN_FILE  = os.environ.get("OWNER_WATCHDOG_TOKEN", f"{TENANT}/store/.dashboard-token")
 PORT        = os.environ.get("OFFICE_PORT", "3430")
 ALERT_SEC   = int(os.environ.get("OWNER_WATCHDOG_ALERT_SEC",   "300"))   # 5 min silent -> alert
 REDRIVE_SEC = int(os.environ.get("OWNER_WATCHDOG_REDRIVE_SEC", "480"))   # 8 min silent -> re-drive
@@ -137,12 +139,10 @@ def run_once(dry=False, verbose=False, check_live=True):
         last_alarm = r["owner_alarmed_at"]
         due = (last_alarm is None) or (now - last_alarm >= REALARM_SEC)
         if due:
-            # NAMES NO HUMAN ON PURPOSE (fixed 2026-09-25). This ran fleet-wide while hardcoding
-            # "a duplicate to the owner", but not every agent's human channel is the owner's: clark serves
-            # A CONTACT (26 channel rows, each prefixed by the engine with "[Message from a contact - this is
-            # NOT your owner (the owner)]") and replies to her with its own say-command, not office-say.
-            # So the old text named the wrong person to the one agent most likely to act on it, and
-            # called her message an OWNER message. Neutral wording is correct for every agent; the
+            # NAMES NO HUMAN ON PURPOSE. This used to hardcode "a duplicate to the owner", but not every
+            # agent's human channel is the owner's: an agent that serves another contact replies with its
+            # own say-command, not office-say, and its channel rows are prefixed by the engine as "not your
+            # owner". So the old text named the wrong person and called a contact's message an OWNER message. Neutral wording is correct for every agent; the
             # sender's identity is already in the quoted prompt below.
             note = (f"owner-watchdog: a HUMAN-CHANNEL message (inbound {rid}) was delivered to you "
                     f"~{mins}m ago and this check saw no outbound reply from you since. "

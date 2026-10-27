@@ -20,12 +20,14 @@ import os
 import subprocess
 import sys
 import time
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
-STORE = "/opt/claude/theoffice/tenant/store"
+STORE = f"{TENANT}/store"
 HEALTH_FILE = f"{STORE}/service-health.json"
 INTERVAL_S = 300  # this producer's timer cadence; briefing alarms if checked_at older than 2x this
 
-WATCH_CONFIG = os.environ.get("SERVICE_HEALTH_CONFIG", "/opt/claude/theoffice/tenant/config/service-health.json")
+WATCH_CONFIG = os.environ.get("SERVICE_HEALTH_CONFIG", f"{TENANT}/config/service-health.json")
 # What to watch is operator config, not code. Shape:
 #   {"freshness": {"unit.service": threshold_hours, ...},   timer-driven oneshots: unhealthy when no success within the threshold (~2-3x the unit's cadence)
 #    "active": ["unit.service", ...],                        long-running units: healthy iff ActiveState=active

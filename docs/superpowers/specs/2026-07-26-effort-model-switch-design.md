@@ -140,7 +140,7 @@ No new command syntax. A new `office-tune` script, modelled directly on `office-
 engine API with the dashboard token). The agent's `CLAUDE.md` documents it:
 
 ```
-Owner  →  "Hestia, állítsd magad xhigh effortra"
+Owner  →  "Agent, set yourself to xhigh effort"
 Agent  →  office-tune effort xhigh
 Agent  →  office-say "⚙️ effort: high → xhigh — applies after the current turn"
 ```

@@ -1298,7 +1298,7 @@ install -m 0755 scripts/office-tune.sh "$HOME/.local/bin/office-tune"
 
 ```markdown
 - **Changing your own model or thinking effort.** If the owner asks you to change how hard you think
-  or which model you run on ("állítsd magad xhigh effortra", "switch to sonnet"), run:
+  or which model you run on ("set yourself to xhigh effort", "switch to sonnet"), run:
   `office-tune effort xhigh` or `office-tune model claude-sonnet-5`.
   Valid effort levels: low, medium, high, xhigh, max. The change is saved to your agent.json, so it
   survives a restart, and applies to this session without losing our conversation. It takes effect
@@ -1309,7 +1309,7 @@ install -m 0755 scripts/office-tune.sh "$HOME/.local/bin/office-tune"
 - [ ] **Step 5: Verify end-to-end**
 
 Run: `npm run build && systemctl --user restart theoffice.service`
-Then from Slack, DM an agent: *"állítsd magad xhigh effortra"*. Confirm it replies with the change and that its pane's status line shows `◉ xhigh` without the conversation resetting.
+Then from Slack, DM an agent: *"set yourself to xhigh effort"*. Confirm it replies with the change and that its pane's status line shows `◉ xhigh` without the conversation resetting.
 
 - [ ] **Step 6: Commit**
 

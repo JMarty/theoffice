@@ -9,10 +9,12 @@ auto-sends to the owner, never fabricates. Its only side effects are (a) one
 inter-agent alert to darryl per drift, (b) its own JSON state file.
 """
 import sqlite3, json, os, sys, time, urllib.request, subprocess
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
-DB   = "/opt/claude/theoffice/tenant/store/theoffice.db"
-TOKEN= "/opt/claude/theoffice/tenant/store/.dashboard-token"
-STATE= "/opt/claude/theoffice/tenant/store/drift-detector-state.json"
+DB   = f"{TENANT}/store/theoffice.db"
+TOKEN= f"{TENANT}/store/.dashboard-token"
+STATE= f"{TENANT}/store/drift-detector-state.json"
 API  = "http://127.0.0.1:3430/api/messages"
 WINDOW_S   = 240     # 4 min: delivered longer ago than this with no reply = drift
 LOOKBACK_S = 3600    # only consider owner msgs from the last hour
@@ -38,13 +40,13 @@ def agent_alive(agent):
     # Session exists at all (idle or busy)? Distinguishes "unreachable/held" from "not running".
     return _pane(agent) is not None
 
-SECRETS = "/opt/claude/theoffice/tenant/secrets/slack"
+SECRETS = f"{TENANT}/secrets/slack"
 
 def slack_replied(agent, channel, since_epoch):
     # Did the agent's bot post to `channel` AFTER since_epoch? Catches replies sent via the DIRECT
     # Slack API (chat.postMessage) that never touch the outbound_queue -- e.g. PROACTIVE outreach,
     # which office-say cannot do (office-say only replies to whoever last messaged the agent).
-    # 2026-07-10 lesson: Clark greeted the owner via chat.postMessage; outbound_queue was empty so the
+    # Lesson: an agent greeted the owner via chat.postMessage; outbound_queue was empty so the
     # detector false-fired. Best-effort: on ANY error return False so a Slack hiccup never SUPPRESSES
     # a real drift (we'd rather alert-and-verify than silently miss one).
     if not channel:

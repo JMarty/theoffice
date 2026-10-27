@@ -13,7 +13,7 @@ for r in roots:
     if os.path.isfile(r): files.append(r)
     else:
         for dp, dn, fn in os.walk(r):
-            if "/.git" in dp or "node_modules" in dp or "mcp-gsuite-src" in dp: continue
+            if "/.git" in dp or "node_modules" in dp: continue
             files += [os.path.join(dp, f) for f in fn]
 for f in files:
     try:
