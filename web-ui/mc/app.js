@@ -471,6 +471,7 @@ const VIEWS = {
             <div class="kt">${esc(c.title)}</div>
             <div class="kmeta">${c.assignee ? `<span class="coin-s" style="background:${colorFor(c.assignee)}">${esc(initialOf(nm(c.assignee)))}</span><span class="who">${esc(nm(c.assignee))}</span>` : `<span class="who">unassigned</span>`}${c.project ? `<span class="who">· ${esc(c.project)}</span>` : ""}</div>
             <select onchange="moveCard('${esc(c.id)}', this)">${cols.map(([v, l]) => `<option value="${v}"${c.status === v ? " selected" : ""}>→ ${l}</option>`).join("")}</select>
+            <button class="xbtn" title="Archive (reversible)" aria-label="Archive card" onclick="archiveCard('${esc(c.id)}', ${JSON.stringify(c.title).replace(/"/g, "&quot;")})">✕</button>
           </div>`).join("")}
       </div>`).join("")}</div>`;
   },
@@ -818,6 +819,11 @@ window.emergencyRestart = async (btn) => {
     if (btn) { btn.disabled = false; btn.textContent = label; }
     setTimeout(softRefresh, 2000);
   }
+};
+window.archiveCard = async (id, title) => {
+  if (!confirm(`Archive "${title}"? (reversible)`)) return;
+  await post(`/api/kanban/${encodeURIComponent(id)}/archive`, {});
+  await showTab("kanban"); renderStrip(); renderTabs();
 };
 window.moveCard = async (id, sel) => { await post(`/api/kanban/${encodeURIComponent(id)}/status`, { status: sel.value }); await showTab("kanban"); renderStrip(); renderTabs(); };
 

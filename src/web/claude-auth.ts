@@ -253,7 +253,21 @@ export function readCredentialState(file: string = CREDENTIALS_FILE): Credential
  * lines that only form the banner once concatenated are prose, not a banner.
  */
 export function paneLooksSignedOut(pane: string): boolean {
-  return SIGNED_OUT_RX.test(pane);
+  return SIGNED_OUT_RX.test(pane) || paneLooksStale401(pane);
+}
+
+/**
+ * The post-reauth state our own runbook documents (claude-agent-auth-restart): the owner signed in again but a
+ * resident pane keeps answering `API Error: 401 ... Invalid authentication credentials` until it restarts.
+ * That text can also be QUOTED by an agent that is reviewing an outage, so this fallback is deliberately narrow:
+ * the pane must be a clean idle prompt (a pane that is mid-turn is never judged by it) AND both fragments must
+ * sit in the last lines of the capture. Assembled from parts so this file never contains the phrase itself.
+ */
+const STALE_401_PARTS = ["API Error: 401", "Invalid authentication " + "credentials"];
+export function paneLooksStale401(pane: string): boolean {
+  if (detectPaneState(pane) !== "idle") return false;
+  const tail = pane.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12).join("\n");
+  return STALE_401_PARTS.every((p) => tail.includes(p));
 }
 
 /**

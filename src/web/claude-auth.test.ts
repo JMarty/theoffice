@@ -100,6 +100,22 @@ describe("readCredentialState", () => {
   });
 });
 
+describe("paneLooksStale401 (post-reauth fallback)", () => {
+  const SEP = "─".repeat(40);
+  const FOOTER = "  bypass permissions on (shift+tab to cycle)";
+  const err = ["API Error: 401", "Invalid authentication " + "credentials"].join(" · ");
+  it("an idle pane whose tail shows the 401 is signed out", () => {
+    expect(paneLooksSignedOut(["● " + err, SEP, "❯ ", SEP, FOOTER].join("\n"))).toBe(true);
+  });
+  it("a pane that is mid-turn (no idle footer) is never judged by it", () => {
+    expect(paneLooksSignedOut(["● " + err, "✻ Working…"].join("\n"))).toBe(false);
+  });
+  it("the text quoted far up the scrollback of an idle pane does not count", () => {
+    const filler = Array.from({ length: 30 }, (_, i) => "line " + i);
+    expect(paneLooksSignedOut(["● " + err, ...filler, SEP, "❯ ", SEP, FOOTER].join("\n"))).toBe(false);
+  });
+});
+
 describe("paneLooksSignedOut", () => {
   // Banners are assembled from parts so this file never contains a rendered one: a literal here
   // would make `grep`, a code review, or a failing-test dump arm the reader's own pane.
