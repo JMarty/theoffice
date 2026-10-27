@@ -133,7 +133,7 @@ describe("task completion wiring", () => {
   const setLastTick = (ms: number) =>
     getDb().prepare(`INSERT INTO scheduler_state (k, v) VALUES ('last_tick', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(ms);
   it("catch-up: a run fired now for a 3h-old occurrence is NOT alarmed until alarmAfterMin after the FIRE (blocker: ageing from the occurrence alarmed it at once)", () => {
-    const T = Date.parse("2026-06-22T07:00:00Z");
+    const T = Date.parse("2026-06-22T04:00:00Z"); // owner tz is Paris: the 03:00 occurrence was 01:00Z, 3 h ago
     setLastTick(T - 5 * 3600_000);
     expect(catchUpMissed(cfg, T)).toBeGreaterThan(0);
     const row = getDb().prepare(`SELECT ts, fired_at FROM task_runs WHERE name='daily-3am' ORDER BY id DESC LIMIT 1`).get() as { ts: number; fired_at: number };
