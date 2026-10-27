@@ -159,6 +159,23 @@ export const MIGRATIONS: Migration[] = [
           CREATE INDEX idx_occ_card ON owner_card_comments(card_id);
           CREATE INDEX idx_occ_unsent ON owner_card_comments(tray, sent_at);`,
   },
+  {
+    version: 9,
+    name: "task_runs completion bookkeeping",
+    // task_runs only recorded that a scheduled task was FIRED, so a run that was delivered and a run that was
+    // finished looked identical for ever. completed_at/outcome are written by the agent through
+    // POST /api/task-runs/:id/complete; inbound_id links the run to its queue row; expects_completion marks runs
+    // whose prompt carried the completion instruction (0 for every pre-migration row and for heartbeats, so
+    // history never raises an alarm); alarmed_at/delivery are written by the unfinished-run sweep, once per run.
+    // Additive, so every existing query and old row stays valid. Migration-only (Model A), never SCHEMA_SQL.
+    sql: `ALTER TABLE task_runs ADD COLUMN completed_at INTEGER;
+          ALTER TABLE task_runs ADD COLUMN outcome TEXT;
+          ALTER TABLE task_runs ADD COLUMN delivery TEXT;
+          ALTER TABLE task_runs ADD COLUMN inbound_id INTEGER;
+          ALTER TABLE task_runs ADD COLUMN alarmed_at INTEGER;
+          ALTER TABLE task_runs ADD COLUMN expects_completion INTEGER NOT NULL DEFAULT 0;
+          CREATE INDEX idx_task_runs_open ON task_runs(completed_at, ts);`,
+  },
 ];
 
 /** Highest known schema version (the baseline, or the max migration version). */

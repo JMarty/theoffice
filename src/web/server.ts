@@ -1,3 +1,4 @@
+import { completeRun, OUTCOMES } from "../scheduler/completion.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -630,6 +631,17 @@ async function handleApi(
     const info = db.prepare(`UPDATE agent_messages SET status='done', result=?, completed_at=unixepoch() WHERE id=?`).run(b.result ?? null, b.id);
     if (info.changes === 0) return json(res, 404, { error: "message not found", id: b.id });
     return json(res, 200, { ok: true, id: b.id });
+  }
+
+  // POST /api/task-runs/:id/complete {outcome, note?} — the agent closes a scheduled-task run (first completion wins)
+  const tr = path.match(/^\/api\/task-runs\/(\d+)\/complete$/);
+  if (tr && m === "POST") {
+    const raw = await readBody(req, res); if (raw === null) return;
+    const b = parseJson(raw) ?? {};
+    const r = completeRun(db, Number(tr[1]), String(b.outcome ?? "done"), typeof b.note === "string" ? b.note : undefined);
+    if (r === "missing") return json(res, 404, { error: "run not found", id: Number(tr[1]) });
+    if (r === "bad_outcome") return json(res, 400, { error: `outcome must be one of: ${OUTCOMES.join(", ")}` });
+    return json(res, 200, { ok: true, id: Number(tr[1]), already: r === "already" });
   }
 
   // POST /api/outbound {agent, channel, text} — agent reply path (-> outbound_queue -> Slack)

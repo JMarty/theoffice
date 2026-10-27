@@ -128,3 +128,22 @@ describe("catchUpMissed (#16 — fire occurrences missed while the engine was do
     expect(runsFor("every-minute")).toBe(b + 1); // occ (T-1m) > since (T-2m) -> fired exactly once
   });
 });
+
+describe("task completion wiring", () => {
+  const now = Date.parse("2026-06-10T07:00:00Z");
+
+  it("injects the run id and the completion instruction into the fired prompt, and links the run to its queue row", () => {
+    fireDueTasks(cfg, now);
+    const run = getDb().prepare(`SELECT id, inbound_id, expects_completion FROM task_runs ORDER BY id DESC LIMIT 1`).get() as { id: number; inbound_id: number; expects_completion: number };
+    expect(run.expects_completion).toBe(1);
+    const q = listQueued("main").find((x) => x.id === run.inbound_id);
+    expect(q?.prompt).toContain(`/api/task-runs/${run.id}/complete`);
+  });
+
+  it("a deduped fire leaves NO orphan run row", () => {
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n;
+    fireDueTasks(cfg, now); // same minute again
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n).toBe(before);
+  });
+
+});
