@@ -313,20 +313,20 @@ describe("12. migration of old owner cards", () => {
 });
 
 describe("13. batch timer", () => {
-  it("fires once at 06:00 Budapest, not twice in the same minute, not at 06:00 UTC", () => {
+  it("fires once at 06:00 Paris, not twice in the same minute, not at 06:00 UTC", () => {
     let fires = 0;
-    const tick = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Budapest", () => { fires++; });
+    const tick = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Paris", () => { fires++; });
 
-    // 2026-09-27 06:00 Europe/Budapest == 04:00 UTC (CEST, UTC+2)
-    const at0600Budapest = Date.parse("2026-09-27T04:00:00.000Z");
-    tick(at0600Budapest);
+    // 2026-09-27 06:00 Europe/Paris == 04:00 UTC (CEST, UTC+2)
+    const at0600Paris = Date.parse("2026-09-27T04:00:00.000Z");
+    tick(at0600Paris);
     expect(fires).toBe(1);
-    tick(at0600Budapest + 30_000); // same minute, second tick
+    tick(at0600Paris + 30_000); // same minute, second tick
     expect(fires).toBe(1);
 
-    // 06:00 UTC is 08:00 Budapest — not one of the three cron times
+    // 06:00 UTC is 08:00 Paris — not one of the three cron times
     fires = 0;
-    const tick2 = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Budapest", () => { fires++; });
+    const tick2 = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Paris", () => { fires++; });
     tick2(Date.parse("2026-09-27T06:00:00.000Z"));
     expect(fires).toBe(0);
   });

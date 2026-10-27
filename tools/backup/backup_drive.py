@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Nightly encrypted off-box DATA backup to the owner's Google Drive (owner decision 2026-10-22).
+"""Nightly encrypted off-box DATA backup to the owner's Google Drive.
 Stages consistent copies (sqlite online backup, optional D1 export), tars + gzips, encrypts with gpg AES256 (passphrase in tenant/secrets/backup/PASSPHRASE, also kept by the owner),
 uploads to the Drive folder named in FOLDER (drive.file token: only files this app made), prunes to 14 daily + 8 weekly, writes store/backup.json
-(checked_at, ok, last_file, size, kept[], problems[]) and tells marveen on the bus ONLY when something is wrong.  --restore-test downloads the newest archive, decrypts to a temp dir and diffs it.
+(checked_at, ok, last_file, size, kept[], problems[]) and tells the orchestrator on the bus ONLY when something is wrong.  --restore-test downloads the newest archive, decrypts to a temp dir and diffs it.
 No code or output ever prints the passphrase or a token."""
 import base64, datetime as dt, glob, hashlib, json, os, re, secrets, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.parse, urllib.request
 TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
 ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 ROOT = TENANT; HOME = os.path.expanduser("~"); HERE = os.path.dirname(os.path.abspath(__file__))
-STATUS = f"{ROOT}/store/backup.json"; PASSFILE = f"{ROOT}/secrets/backup/PASSPHRASE"; TOKFILE = os.environ.get("BACKUP_DRIVE_TOKEN") or next(iter(sorted(glob.glob(f"{ROOT}/secrets/.gmail-creds/.oauth2.drive.*.json"))), "")
+STATUS = f"{ROOT}/store/backup.json"; PASSFILE = f"{ROOT}/secrets/backup/PASSPHRASE"; TOKFILE = os.environ.get("BACKUP_DRIVE_TOKEN") or f"{ROOT}/secrets/backup/drive-token.json"      # OAuth json with client_id, client_secret, refresh_token, token_uri (drive.file scope)
 FOLDER = os.environ.get("BACKUP_DRIVE_FOLDER", "Office Backups (encrypted)"); PREFIX = "office-"; SUFFIX = ".tar.gz.gpg"; KEEP_DAILY, KEEP_WEEKLY = 14, 8
 APP = os.environ.get("BACKUP_APP_DATA", "")      # optional: an app data dir (db + projects + media) to include; unset = skipped
 APP_DB = os.environ.get("BACKUP_APP_DB", "app.db")      # sqlite file inside the app data dir

@@ -9,10 +9,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * pressed Enter, and SUBMITTED a prompt with a ~180-char hole punched out of the middle — then
  * marked it delivered.
  *
- * Found live: marveen msg 8752 reached darryl's pane with the footer spliced mid-sentence. The DB
- * copy was intact; the missing span measured ~178 chars = exactly one CHUNK. The deleted text was
- * "build it. Ping me only if you need a decision." — an explicit authorisation silently removed
- * from an inter-agent instruction.
+ * Seen live: a message reached a pane with its footer spliced mid-sentence. The DB copy was intact;
+ * the missing span was exactly one CHUNK, and the deleted text was an explicit authorisation silently
+ * removed from an inter-agent instruction.
  *
  * The invariant that must never regress: A PARTIALLY-TYPED PROMPT IS NEVER SUBMITTED. On a failed
  * chunk we clear the draft and fail the delivery, so the queue requeues it (deliverClaude requeues

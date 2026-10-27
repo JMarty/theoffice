@@ -19,9 +19,9 @@ DAY = 86_400.0
 
 def base_watch(**over):
     w = {
-        "id": "tracker-recovered",
+        "id": "service-recovered",
         "owner_agent": "dwight",
-        "description": "wake me when the tracker modem reconnects",
+        "description": "wake me when the service comes back",
         "check": {"type": "http", "url": "http://localhost:8082/x", "expect_body_contains": "valid"},
         "fire_when": "match",
         "cadence": {"interval_sec": 300},

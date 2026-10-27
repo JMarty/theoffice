@@ -23,7 +23,7 @@
 set -uo pipefail
 
 SOCKET=theoffice
-ROOT="${OFFICE_TENANT_ROOT:-/opt/claude/theoffice/tenant}"
+ROOT="${OFFICE_TENANT_ROOT:-$(cd "$(dirname "$0")/../../tenant" && pwd)}"
 DB="$ROOT/store/theoffice.db"
 TOKEN_FILE="$ROOT/store/.dashboard-token"
 STATE="$ROOT/store/frozen-pane-alarm.state"

@@ -9,7 +9,7 @@ TENANT="${OFFICE_TENANT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/t
 F="$TENANT/agents/$AID/CLAUDE.md"
 [ -f "$F" ] || { echo "no CLAUDE.md for $AID at $F" >&2; exit 1; }
 # normalize stale old-box API refs in the body (idempotent; runs even if already officeified)
-sed -i 's#http://localhost:3420#http://localhost:3430#g; s#/opt/claude/marveen/marveen/store/.dashboard-token#$OFFICE_TENANT_ROOT/store/.dashboard-token#g; s#"agent_id"#"agentId"#g' "$F"
+sed -i 's#http://localhost:3420#http://localhost:3430#g; s#[^ "]*/store/.dashboard-token#$OFFICE_TENANT_ROOT/store/.dashboard-token#g; s#"agent_id"#"agentId"#g' "$F"
 if grep -q "THE OFFICE -- RUNTIME OVERRIDE" "$F"; then echo "$AID already officeified (refs normalized)"; exit 0; fi
 python3 - "$F" "$AID" <<'PY'
 import sys

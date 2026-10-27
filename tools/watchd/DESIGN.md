@@ -17,7 +17,7 @@ agent (POST `/api/messages`) **only when a watch fires**. Agents register
 ~50–80 MB resident, Python ~15–20 MB, and this box runs under real memory
 pressure (earlyoom kills `claude` panes). the owner's whole objection to the 60 s
 poller was resource cost, so the lighter always-on process is the right call. It
-matches the existing poll-tools (curve/Grocery) and reads the `inbound_queue`
+matches the existing poll-tools and reads the `inbound_queue`
 sqlite DB read-only for delivery confirmation.
 
 ## Scope (gate 5 — do NOT over-build)
@@ -27,7 +27,7 @@ v1 CORE = **registry + min-heap scheduler for POLL-type watches
 + a status file.**
 
 NATIVE PUSH sources that can already hit `/api/messages` directly — a Home
-Assistant automation/webhook (the Task-1 tracker push is exactly this) — do
+Assistant automation/webhook (a device-state push is exactly this) — do
 **not** route through watchd. The event-receiver side stays thin: HA POSTs
 straight to `/api/messages`. watchd only exists for conditions that have no
 native push and would otherwise force an agent to poll.
@@ -41,15 +41,15 @@ trivially inspectable and survives a service restart on disk.
 
 ```jsonc
 {
-  "id": "tracker-recovered",          // unique; must equal the filename stem
+  "id": "service-recovered",          // unique; must equal the filename stem
   "owner_agent": "home-agent",                // registrant; default wake target
-  "description": "wake me when the tracker modem reconnects",
+  "description": "wake me when the service comes back",
   "check": {                              // POLL-type only
     "type": "http",                       // http | shell | file_mtime
     // http:      { "url":..., "expect_status":200, "expect_body_contains":"..." }
     // shell:     { "cmd":[...], "expect_exit":0, "expect_stdout_contains":"..." }
     // file_mtime:{ "path":..., "newer_than_epoch":<ts> }
-    "url": "http://tracker.example:8082/api/...",
+    "url": "http://service.example/health",
     "expect_body_contains": "\"valid\":true"
   },
   "fire_when": "match",                   // "match" (check passed) | "nomatch"
@@ -135,7 +135,7 @@ what is being watched and spot a zombie. Trust needs a window into it.
 
 ## Deployment
 `watchd.service` (`systemd --user`), `Restart=always`, `EnvironmentFile` for
-`OFFICE_TENANT_ROOT`. Rollback-safe: it only ever *reads* the tracker/HA/DB and
+`OFFICE_TENANT_ROOT`. Rollback-safe: it only ever *reads* the checked endpoints/DB and
 *writes* to `/api/messages` + its own status file; disabling the unit stops all
 watching with zero side effects on the engine (separate process, separate
 concern). Deploy = install unit, `enable --now`, verify status file appears +

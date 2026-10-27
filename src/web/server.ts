@@ -817,7 +817,7 @@ async function handleApi(
     return json(res, 200, { ok: true, id, category: b.category });
   }
 
-  // ==================== Owner Board (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md v1.1) ====================
+  // ==================== Owner Board (owner board spec v1.1) ====================
   // Fully separate from kanban_cards/kanban routes by design (hard constraint) — own table, own endpoints.
 
   // POST /api/owner-cards — create a card

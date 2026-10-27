@@ -21,7 +21,7 @@
 # reboot scenario is OLLAMA's cap (kernel-enforced, already live) + oomwatch's 2048 shed + the
 # guard's (soon fail-closed) soft swap-pause — NOT this line. Do not oversell it as "the" backstop.
 set -euo pipefail
-ROOT=/opt/claude/theoffice
+ROOT="${OFFICE_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 UNIT="reembed-$(date +%Y%m%d-%H%M%S)"   # date in bash is fine (this is not a workflow script)
 NODE="$(command -v node)"
 

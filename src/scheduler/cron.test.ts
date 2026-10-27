@@ -1,17 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { isDueNow } from "./cron.js";
 
-const TZ = "Europe/Budapest";
+const TZ = "Europe/Paris";
 
 describe("isDueNow (timezone-aware)", () => {
-  it("fires 08:00 Budapest in summer (CEST = UTC+2)", () => {
-    const ms = Date.parse("2026-06-09T06:00:00Z"); // 08:00 Budapest
+  it("fires 08:00 Paris in summer (CEST = UTC+2)", () => {
+    const ms = Date.parse("2026-06-09T06:00:00Z"); // 08:00 Paris
     expect(isDueNow("0 8 * * *", ms, TZ)).toBe(true);
     expect(isDueNow("0 9 * * *", ms, TZ)).toBe(false);
   });
 
-  it("fires 08:00 Budapest in winter (CET = UTC+1) — DST handled", () => {
-    const ms = Date.parse("2026-01-15T07:00:00Z"); // 08:00 Budapest
+  it("fires 08:00 Paris in winter (CET = UTC+1) — DST handled", () => {
+    const ms = Date.parse("2026-01-15T07:00:00Z"); // 08:00 Paris
     expect(isDueNow("0 8 * * *", ms, TZ)).toBe(true);
   });
 

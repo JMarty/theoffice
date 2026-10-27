@@ -45,7 +45,7 @@ beforeAll(() => {
     },
     web: { host: "127.0.0.1", port: 3430 },
     tmux: { socket: "test" },
-    owner: { displayName: "Owner", locale: "en", timezone: "Europe/Budapest" },
+    owner: { displayName: "Owner", locale: "en", timezone: "Europe/Paris" },
     channel: { provider: "none" },
   };
 });
@@ -102,10 +102,10 @@ describe("catchUpMissed (#16 — fire occurrences missed while the engine was do
   });
 
   it("6h CUTOFF: a daily task whose last occurrence is ~11h ago is NOT caught up (proves the bound)", () => {
-    // T = 14:00 Budapest; the daily 03:00 Budapest job last ran 11h ago — beyond the 6h window. Even though
+    // T = 14:00 Paris; the daily 03:00 Paris job last ran 11h ago — beyond the 6h window. Even though
     // it falls after lastTick (engine was down 30h), it must NOT be caught up. The shipped every-minute test
     // only asserted <=1; this proves the cutoff specifically against a real daily schedule.
-    const T = Date.parse("2026-06-22T12:00:00Z"); // 14:00 Europe/Budapest
+    const T = Date.parse("2026-06-22T12:00:00Z"); // 14:00 Europe/Paris
     setLastTick(T - 30 * 60 * 60 * 1000); // 30h ago, so the daily occurrence IS after lastTick...
     const before = runsFor("daily-3am");
     catchUpMissed(cfg, T);

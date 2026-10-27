@@ -37,7 +37,7 @@ describe("checkTenantLeaks", () => {
     expect(checkTenantLeaks("x", "run this as marveen").some((i) => /marveen/.test(i.message))).toBe(true);
   });
   it("flags an absolute install path", async () => {
-    expect(checkTenantLeaks("x", "cd /opt/claude/theoffice").some((i) => /install path/.test(i.message))).toBe(true);
+    expect(checkTenantLeaks("x", "cd /opt/office").some((i) => /install path/.test(i.message))).toBe(true);
     expect(checkTenantLeaks("x", "see ~/notes").some((i) => /install path/.test(i.message))).toBe(true);
   });
   it("flags a tenant email", async () => {

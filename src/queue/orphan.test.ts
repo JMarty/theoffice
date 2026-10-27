@@ -5,9 +5,9 @@ import { decideOrphan, type OrphanRow, type SessionSnapshot, type OrphanOpts } f
  * Safety tests for orphan-requeue (kanban aba29f60). Every case here is a case where getting it wrong
  * re-sends real messages to a live fleet, so the bias under test is: LEAVE unless certain.
  *
- * Anchored on the incident: owner Slack msg 9766 was delivered to marveen at 11:02:18, marveen was
- * OOM-killed at 11:36:03, and was relaunched at 11:37:59 as a NEW session with none of the context.
- * The engine considered the message handled; the owner waited 36 minutes.
+ * Anchored on the failure mode: an owner message is delivered to an agent, the agent is OOM-killed and
+ * relaunched as a NEW session with none of the context. The engine considered the message handled; the
+ * owner waited.
  */
 
 const NOW = 1_785_580_000;

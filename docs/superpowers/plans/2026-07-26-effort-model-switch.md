@@ -333,7 +333,7 @@ import type { AgentDef, EngineConfig } from "../types.js";
 
 const cfg = {
   tmux: { socket: "s" },
-  owner: { timezone: "Europe/Budapest" },
+  owner: { timezone: "Europe/Paris" },
   paths: { tenantRoot: "/t", agentsDir: "/t/agents" },
   web: { port: 3430 },
 } as unknown as EngineConfig;

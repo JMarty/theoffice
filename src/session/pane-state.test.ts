@@ -486,7 +486,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   );
   const PERM_BASH = pane(
     "  Do you want to run this command?",
-    "     rm -rf /opt/claude/theoffice/tenant/store",
+    "     rm -rf <tenant>/store",
     "   ❯ 1. Yes",
     "     2. No, and tell Claude what to do differently (esc)",
   );
@@ -535,7 +535,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   // install / un-seeded hasTrustDialogAccepted wedges here too, and it also carries no idle footer.
   const FOLDER_TRUST = pane(
     "  Do you trust the files in this folder?",
-    "  /opt/claude/theoffice/tenant/agents/newbie",
+    "  <tenant>/agents/newbie",
     "   ❯ 1. Yes, proceed",
     "     2. No, exit",
   );

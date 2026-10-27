@@ -127,7 +127,7 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 8,
     name: "owner_cards",
-    // Owner Board v1.1 (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md, owner GO 2026-09-27). A board only
+    // Owner Board v1.1 (owner board spec v1.1). A board only
     // the owner uses: agents post short cards, he answers via a comment thread and picks a tray (now/batch)
     // per answer. New tables -> migration-only (Model A), never SCHEMA_SQL. Separate from kanban_cards by
     // design (hard constraint in the spec): no FK, no shared endpoints, the migration below only READS it.

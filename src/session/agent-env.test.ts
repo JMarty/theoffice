@@ -14,7 +14,7 @@ describe("buildAgentEnv — engine reserved keys win over the agent .env", () =>
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  const cfg: any = { owner: { timezone: "Europe/Budapest" }, paths: { tenantRoot: "/tenant" }, web: { port: 3430 } };
+  const cfg: any = { owner: { timezone: "Europe/Paris" }, paths: { tenantRoot: "/tenant" }, web: { port: 3430 } };
 
   it("a hostile .env cannot override reserved keys, but legit vars survive", () => {
     writeFileSync(
@@ -50,7 +50,7 @@ describe("buildAgentEnv — HOME selects the subscription", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  const cfg: any = { owner: { timezone: "Europe/Budapest" }, paths: { tenantRoot: "/tenant" }, web: { port: 3430 } };
+  const cfg: any = { owner: { timezone: "Europe/Paris" }, paths: { tenantRoot: "/tenant" }, web: { port: 3430 } };
 
   it("defaults to the owner's HOME (shared account) when ownAccount is unset", () => {
     const env = buildAgentEnv(cfg, { id: "agent-b", dir });

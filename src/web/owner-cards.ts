@@ -9,7 +9,7 @@ import { loadConfig } from "../config.js";
 export const ownerHandle = (): string => loadConfig().owner.handle ?? "owner";
 
 /**
- * Owner Board v1.1 (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md, owner GO 2026-09-27). A board only
+ * Owner Board v1.1 (owner board spec v1.1). A board only
  * the owner uses: agents post short cards, he answers via a per-card comment thread and picks a tray
  * (NOW or BATCH) per answer. Sends bundle ALL of one agent's unsent comments for a tray into ONE bus
  * message, so an agent is woken at most once per send. Fully separate from kanban_cards (hard constraint):

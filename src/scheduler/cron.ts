@@ -2,7 +2,7 @@ import parser from "cron-parser";
 
 /**
  * True if a 5-field cron expression is due in the minute containing `nowMs`,
- * evaluated in IANA timezone `tz` (e.g. "Europe/Budapest"). Pure + testable.
+ * evaluated in IANA timezone `tz` (e.g. "Europe/Paris"). Pure + testable.
  *
  * We evaluate against the END of the current minute and take the most recent
  * scheduled time at or before it; if that falls in the current minute, it's due.

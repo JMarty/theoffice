@@ -18,8 +18,9 @@
 set -uo pipefail
 
 API="http://127.0.0.1:3430/api/messages"
-TOKEN_PATH="/opt/claude/theoffice/tenant/store/.dashboard-token"
-AGENTS_DIR="/opt/claude/theoffice/tenant/agents"
+TENANT="${OFFICE_TENANT_ROOT:-$(cd "$(dirname "$0")/../tenant" && pwd)}"
+TOKEN_PATH="$TENANT/store/.dashboard-token"
+AGENTS_DIR="$TENANT/agents"
 AUTH="${HOME}/.codex/auth.json"
 CODEX="${CODEX:-${HOME}/.local/bin/codex}"; command -v "$CODEX" >/dev/null 2>&1 || CODEX="$(command -v codex || echo codex)"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1

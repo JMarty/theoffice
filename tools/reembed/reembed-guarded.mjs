@@ -120,7 +120,7 @@ const log = (m) => console.log(`[${stamp()}] ${m}`);
 
 async function bus(content) {
   try {
-    const root = process.env.OFFICE_TENANT_ROOT ?? "/opt/claude/theoffice/tenant";
+    const root = process.env.OFFICE_TENANT_ROOT ?? new URL("../../tenant", import.meta.url).pathname;
     const token = readFileSync(`${root}/store/.dashboard-token`, "utf8").trim();
     // F2 (Toby): HARD TIMEOUT. On an ABORT the box is thrashing — that is WHY we are aborting —
     // and the dashboard is under the same pressure, so an untimed fetch can block at exactly the
