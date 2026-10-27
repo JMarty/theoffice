@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, closeDb, getDb } from "../db/index.js";
-import { OUTCOMES, expectsCompletion, completeRun, completionInstruction, findUnfinished, markAlarmed, alarmText } from "./completion.js";
+import { OUTCOMES, expectsCompletion, completeRun, completionInstruction, findUnfinished, markAlarmed, alarmDigest } from "./completion.js";
 
 let dir: string;
 beforeEach(() => {
@@ -15,8 +15,8 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function addRun(name: string, ts: number, expects = 1): number {
-  const r = getDb().prepare(`INSERT INTO task_runs (name, agent, ts, expects_completion) VALUES (?, 'main', ?, ?)`).run(name, ts, expects);
+function addRun(name: string, firedAt: number, expects = 1, ts = firedAt): number {
+  const r = getDb().prepare(`INSERT INTO task_runs (name, agent, ts, fired_at, expects_completion) VALUES (?, 'main', ?, ?, ?)`).run(name, ts, firedAt, expects);
   return Number(r.lastInsertRowid);
 }
 
@@ -69,6 +69,12 @@ describe("completeRun", () => {
 
 describe("findUnfinished (the watchdog sweep)", () => {
   const NOW = 100_000;
+  it("ages a run from its FIRE time: a catch-up run with an hours-old occurrence ts is not alarmed 30 s after firing", () => {
+    const id = addRun("catchup", NOW - 30, 1, NOW - 4 * 3600); // occurrence 4 h ago, fired 30 s ago
+    expect(findUnfinished(getDb(), NOW, 30, 10)).toHaveLength(0);
+    expect(findUnfinished(getDb(), NOW + 31 * 60, 30, 10).map((r) => r.id)).toEqual([id]);
+  });
+
   it("returns only expecting, open, unalarmed runs older than the threshold", () => {
     const old = addRun("old-open", NOW - 40 * 60);
     addRun("fresh", NOW - 5 * 60);
@@ -102,6 +108,18 @@ describe("expectsCompletion", () => {
   });
 });
 
+describe("alarm digest", () => {
+  it("one message lists every run; a single run uses the singular head", () => {
+    const rows = [1, 2, 3].map((n) => ({ id: n, name: `t${n}`, agent: "main", ts: 0, fired_at: 1000, delivery: n === 2 ? "queued" : "delivered" }));
+    const t = alarmDigest(rows, 1000 + 40 * 60);
+    expect(t.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(3);
+    expect(t).toContain("3 scheduled tasks");
+    expect(t).toContain("still queued");
+    expect(alarmDigest([rows[0]], 1000 + 40 * 60)).toContain("A scheduled task fired");
+    expect(t).not.toContain("\u2014");
+  });
+});
+
 describe("text", () => {
   it("the instruction names the run id, the endpoint and every outcome, and has no em dash", () => {
     const t = completionInstruction(42);
@@ -111,11 +129,4 @@ describe("text", () => {
     expect(t).not.toContain("—");
   });
 
-  it("the alarm names the task, the age and how the message was delivered", () => {
-    const t = alarmText({ id: 7, name: "daily-report", agent: "main", ts: 1000, delivery: "queued" }, 1000 + 45 * 60);
-    expect(t).toContain("daily-report");
-    expect(t).toContain("45 min");
-    expect(t).toContain("queued");
-    expect(t).not.toContain("—");
-  });
 });

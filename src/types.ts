@@ -78,7 +78,7 @@ export interface EngineConfig {
   /** optional absolute path of the clean-reset orchestrator; default <tenantRoot>/tools/clean-reset/clean_reset.py */
   cleanResetScript?: string;
   /** scheduled-task completion: runs carry an id + completion instruction; unfinished `task` runs alarm the main agent once (heartbeats never) */
-  taskCompletion?: { enabled?: boolean; alarmAfterMin?: number };
+  taskCompletion?: { enabled?: boolean; alarm?: boolean; alarmAfterMin?: number };
   /** briefing-board section keys this tenant accepts (replaces the built-in default list) */
   briefingSections?: string[];
   /** extra identifiers the shipped-template leak check must reject (owner nickname, private repo names ...) */

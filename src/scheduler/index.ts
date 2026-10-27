@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { EngineConfig, ScheduledTaskType } from "../types.js";
 import { enqueueInbound } from "../queue/index.js";
 import { sendAgentMessage } from "../bus/index.js";
-import { alarmText, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
+import { alarmDigest, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
 import { getDb } from "../db/index.js";
 import { isDueNow, minuteKey, lastOccurrenceBefore } from "./cron.js";
 import { log } from "../logger.js";
@@ -89,10 +89,10 @@ function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: s
   const db = getDb();
   const completion = cfg.taskCompletion?.enabled !== false;
   const run = db
-    .prepare(`INSERT INTO task_runs (name, agent, ts, expects_completion) VALUES (?, ?, ?, ?)`)
+    .prepare(`INSERT INTO task_runs (name, agent, ts, fired_at, expects_completion) VALUES (?, ?, ?, unixepoch(), ?)`)
     .run(t.name, t.agent, tsSec, completion ? expectsCompletion(t.type) : 0);
   const runId = Number(run.lastInsertRowid);
-  const id = enqueueInbound({ agentId: t.agent, source: "scheduler", prompt: wrap(t, completion ? runId : undefined), dedupKey });
+  const id = enqueueInbound({ agentId: t.agent, source: "scheduler", prompt: wrap(t, completion && t.type === "task" ? runId : undefined), dedupKey });
   if (id == null) {
     db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(runId);
     return undefined;
@@ -101,14 +101,15 @@ function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: s
   return id;
 }
 
-/** Alarm the main agent (once per run) about task runs that fired but were never marked complete. */
+/** Alarm the main agent with ONE digest (each run once) about task runs that fired but were never marked complete. */
 export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
-  if (cfg.taskCompletion?.enabled === false) return 0;
+  if (cfg.taskCompletion?.enabled === false || cfg.taskCompletion?.alarm === false) return 0; // shadow mode: instruction + records, no alarm
   const db = getDb();
   const nowSec = Math.floor(nowMs / 1000);
   const rows = findUnfinished(db, nowSec, cfg.taskCompletion?.alarmAfterMin ?? 30, SWEEP_MAX);
+  if (!rows.length) return 0;
+  sendAgentMessage(cfg.mainAgentId, cfg.mainAgentId, alarmDigest(rows, nowSec)); // one digest, not N messages (bus breakers)
   for (const r of rows) {
-    sendAgentMessage(cfg.mainAgentId, cfg.mainAgentId, alarmText(r, nowSec));
     markAlarmed(db, r.id, r.delivery);
     logger.warn({ run: r.id, task: r.name, agent: r.agent, delivery: r.delivery }, "scheduled task fired but never completed");
   }

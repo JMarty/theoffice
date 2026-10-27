@@ -166,7 +166,8 @@ export const MIGRATIONS: Migration[] = [
     // finished looked identical for ever. completed_at/outcome are written by the agent through
     // POST /api/task-runs/:id/complete; inbound_id links the run to its queue row; expects_completion marks runs
     // whose prompt carried the completion instruction (0 for every pre-migration row and for heartbeats, so
-    // history never raises an alarm); alarmed_at/delivery are written by the unfinished-run sweep, once per run.
+    // history never raises an alarm); fired_at is the REAL fire time (ts is the occurrence time, hours old for a
+    // catch-up run, so ageing from ts would alarm a freshly fired catch-up run immediately); alarmed_at/delivery are written by the unfinished-run sweep, once per run.
     // Additive, so every existing query and old row stays valid. Migration-only (Model A), never SCHEMA_SQL.
     sql: `ALTER TABLE task_runs ADD COLUMN completed_at INTEGER;
           ALTER TABLE task_runs ADD COLUMN outcome TEXT;
@@ -174,6 +175,7 @@ export const MIGRATIONS: Migration[] = [
           ALTER TABLE task_runs ADD COLUMN inbound_id INTEGER;
           ALTER TABLE task_runs ADD COLUMN alarmed_at INTEGER;
           ALTER TABLE task_runs ADD COLUMN expects_completion INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE task_runs ADD COLUMN fired_at INTEGER;
           CREATE INDEX idx_task_runs_open ON task_runs(completed_at, ts);`,
   },
 ];

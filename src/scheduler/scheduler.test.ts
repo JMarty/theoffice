@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EngineConfig } from "../types.js";
 import { openDb, closeDb, getDb } from "../db/index.js";
 import { listQueued } from "../queue/index.js";
-import { fireDueTasks, catchUpMissed } from "./index.js";
+import { fireDueTasks, catchUpMissed, sweepUnfinished } from "./index.js";
 import { lastOccurrenceBefore } from "./cron.js";
 
 let root: string;
@@ -130,6 +130,47 @@ describe("catchUpMissed (#16 — fire occurrences missed while the engine was do
 });
 
 describe("task completion wiring", () => {
+  const setLastTick = (ms: number) =>
+    getDb().prepare(`INSERT INTO scheduler_state (k, v) VALUES ('last_tick', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(ms);
+  it("catch-up: a run fired now for a 3h-old occurrence is NOT alarmed until alarmAfterMin after the FIRE (blocker: ageing from the occurrence alarmed it at once)", () => {
+    const T = Date.parse("2026-06-22T07:00:00Z");
+    setLastTick(T - 5 * 3600_000);
+    expect(catchUpMissed(cfg, T)).toBeGreaterThan(0);
+    const row = getDb().prepare(`SELECT ts, fired_at FROM task_runs WHERE name='daily-3am' ORDER BY id DESC LIMIT 1`).get() as { ts: number; fired_at: number };
+    expect(row.fired_at).toBeGreaterThan(row.ts + 3 * 3600 - 60); // occurrence time is hours older than the real fire time
+    const msgs = () => (getDb().prepare(`SELECT COUNT(*) AS n FROM agent_messages`).get() as { n: number }).n;
+    const before = msgs();
+    expect(sweepUnfinished(cfg, Date.now() + 60_000)).toBe(0); // one minute after firing: nothing
+    expect(msgs()).toBe(before);
+  });
+
+  it("a due sweep sends ONE digest message for several runs, and shadow mode (alarm:false) sends none", () => {
+    const db = getDb();
+    db.prepare(`DELETE FROM task_runs`).run();
+    const old = Math.floor(Date.now() / 1000) - 3600;
+    for (const n of ["a", "b", "c"]) db.prepare(`INSERT INTO task_runs (name, agent, ts, fired_at, expects_completion) VALUES (?, 'main', ?, ?, 1)`).run(n, old, old);
+    const msgs = () => (db.prepare(`SELECT COUNT(*) AS n FROM agent_messages`).get() as { n: number }).n;
+    const before = msgs();
+    expect(sweepUnfinished({ ...cfg, taskCompletion: { alarm: false } }, Date.now())).toBe(0);
+    expect(msgs()).toBe(before);
+    expect(sweepUnfinished(cfg, Date.now())).toBe(3);
+    expect(msgs()).toBe(before + 1);
+    expect(sweepUnfinished(cfg, Date.now())).toBe(0); // each run alarms once
+  });
+
+  it("heartbeat runs get no run id in the prompt and never expect completion", () => {
+    const tdir = join(root, "scheduled-tasks-hb");
+    mkdirSync(join(tdir, "hb"), { recursive: true });
+    writeFileSync(join(tdir, "hb", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "hbagent", type: "heartbeat", prompt: "silent check" }));
+    const hbCfg = { ...cfg, paths: { ...cfg.paths, scheduledTasksDir: tdir } };
+    expect(fireDueTasks(hbCfg, Date.parse("2026-06-23T10:00:00Z"))).toBe(1);
+    const run = getDb().prepare(`SELECT inbound_id, expects_completion FROM task_runs WHERE name='hb'`).get() as { inbound_id: number; expects_completion: number };
+    expect(run.expects_completion).toBe(0);
+    const q = listQueued("hbagent").find((x) => x.id === run.inbound_id);
+    expect(q?.prompt).toContain("silent check");
+    expect(q?.prompt).not.toContain("/api/task-runs/");
+  });
+
   const now = Date.parse("2026-06-10T07:00:00Z");
 
   it("injects the run id and the completion instruction into the fired prompt, and links the run to its queue row", () => {

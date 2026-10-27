@@ -39,17 +39,18 @@ export interface UnfinishedRun {
   name: string;
   agent: string;
   ts: number;
+  fired_at: number;
   delivery: string | null;
 }
 
-/** Runs that expected completion, are still open, were never alarmed, and are older than `afterMin`. Oldest first, capped. */
+/** Runs that expected completion, are still open, were never alarmed, and were FIRED more than `afterMin` ago (fire time, not the occurrence time). Oldest first, capped. */
 export function findUnfinished(db: DB, nowSec: number, afterMin: number, limit: number): UnfinishedRun[] {
   const rows = db
     .prepare(
-      `SELECT t.id, t.name, t.agent, t.ts, i.status AS delivery
+      `SELECT t.id, t.name, t.agent, t.ts, t.fired_at, i.status AS delivery
          FROM task_runs t LEFT JOIN inbound_queue i ON i.id = t.inbound_id
-        WHERE t.expects_completion = 1 AND t.completed_at IS NULL AND t.alarmed_at IS NULL AND t.ts <= ?
-        ORDER BY t.ts ASC LIMIT ?`
+        WHERE t.expects_completion = 1 AND t.completed_at IS NULL AND t.alarmed_at IS NULL AND t.fired_at <= ?
+        ORDER BY t.fired_at ASC LIMIT ?`
     )
     .all(nowSec - afterMin * 60, limit) as UnfinishedRun[];
   return rows;
@@ -59,12 +60,14 @@ export function markAlarmed(db: DB, id: number, delivery: string | null): void {
   db.prepare(`UPDATE task_runs SET alarmed_at = unixepoch(), delivery = ? WHERE id = ? AND alarmed_at IS NULL`).run(delivery, id);
 }
 
-export function alarmText(r: UnfinishedRun, nowSec: number): string {
-  const min = Math.max(1, Math.round((nowSec - r.ts) / 60));
-  const how =
-    r.delivery === "queued" ? "its prompt is still queued, never delivered" : r.delivery ? `its prompt was ${r.delivery}` : "delivery state unknown";
-  return (
-    `[task-completion] Scheduled task "${r.name}" (agent ${r.agent}, run #${r.id}) fired ${min} min ago and was never marked complete; ${how}. ` +
-    `Check whether it ran; if it did, close it: POST /api/task-runs/${r.id}/complete.`
-  );
+function runLine(r: UnfinishedRun, nowSec: number): string {
+  const min = Math.max(1, Math.round((nowSec - r.fired_at) / 60));
+  const how = r.delivery === "queued" ? "prompt still queued, never delivered" : r.delivery ? `prompt ${r.delivery}` : "delivery unknown";
+  return `- "${r.name}" (agent ${r.agent}, run #${r.id}): fired ${min} min ago, ${how}`;
+}
+
+/** ONE message per sweep, however many runs: the bus rate breakers must never see a burst of alarms. */
+export function alarmDigest(rows: UnfinishedRun[], nowSec: number): string {
+  const head = rows.length === 1 ? "A scheduled task fired but was never marked complete:" : `${rows.length} scheduled tasks fired but were never marked complete:`;
+  return `[task-completion] ${head}\n${rows.map((r) => runLine(r, nowSec)).join("\n")}\nCheck whether each ran; if it did, close it: POST /api/task-runs/<run id>/complete.`;
 }
