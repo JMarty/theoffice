@@ -118,6 +118,32 @@ if [ -d "$INSTALL_DIR/templates/scheduled-tasks" ]; then
   done
 fi
 
+# Seed the office METHODOLOGY from templates/ (generic skills, fleet rules, tools, agent personas; exported nightly from the running office,
+# see templates/OFFICE-EXPORT.md). ONLY IF ABSENT, never clobbers anything you already have.
+#   OFFICE_SEED=base (default): skills (tenant + ~/.claude/skills), FLEET-RULES.md, AGENT-CONVENTIONS.md, tools.
+#   OFFICE_SEED=full: also the ten agent personas (seeded DISABLED: enable the ones you want in agent.json).   OFFICE_SEED=none: skip.
+_SEED="${OFFICE_SEED:-base}"
+if [ "$_SEED" != "none" ] && [ -d "$INSTALL_DIR/templates/skills" ]; then
+  say "Seeding the office methodology from templates/ (mode: $_SEED; existing files are kept)"
+  mkdir -p "$TENANT_ROOT/skills" "$TENANT_ROOT/tools" "$HOME/.claude/skills"
+  cp -rn "$INSTALL_DIR/templates/skills/." "$TENANT_ROOT/skills/" 2>/dev/null || true
+  cp -rn "$INSTALL_DIR/templates/skills/." "$HOME/.claude/skills/" 2>/dev/null || true
+  [ -d "$INSTALL_DIR/templates/tools" ] && { cp -rn "$INSTALL_DIR/templates/tools/." "$TENANT_ROOT/tools/" 2>/dev/null || true; }
+  for _f in FLEET-RULES.md AGENT-CONVENTIONS.md; do
+    [ -f "$INSTALL_DIR/templates/tenant/$_f" ] && [ ! -e "$TENANT_ROOT/$_f" ] && cp "$INSTALL_DIR/templates/tenant/$_f" "$TENANT_ROOT/$_f"
+  done
+  if [ "$_SEED" = "full" ] && [ -d "$INSTALL_DIR/templates/agents" ]; then
+    for _a in "$INSTALL_DIR"/templates/agents/*/; do
+      _id=$(basename "$_a")
+      if [ -d "$_a" ] && [ ! -e "$TENANT_ROOT/agents/$_id" ]; then
+        cp -r "$_a" "$TENANT_ROOT/agents/$_id"
+        [ -f "$TENANT_ROOT/agents/$_id/agent.json" ] && node -e 'const f=process.argv[1],fs=require("fs");const c=JSON.parse(fs.readFileSync(f,"utf8"));c.enabled=false;fs.writeFileSync(f,JSON.stringify(c,null,2)+"\n")' "$TENANT_ROOT/agents/$_id/agent.json" || true
+        say "seeded agent persona (disabled): $_id"
+      fi
+    done
+  fi
+fi
+
 # ---- 3b. dashboard bind: localhost vs LAN -----------------------------------
 # Default 127.0.0.1 (safe — only this machine / SSH tunnel). LAN (0.0.0.0) lets
 # any device on the home network reach it (phone, laptop). Choose via prompt when

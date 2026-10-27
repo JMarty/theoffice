@@ -15,6 +15,8 @@ sqlite3, git, Claude Code), the engine, and a **clean empty tenant** (no agents/
 else's) — then launches a guided wizard that helps you create your main agent, wire it to Slack,
 and bring it online. Your main agent then introduces itself and offers to build out your team.
 
+**Methodology included.** The generic skills, background tasks, agent personas, fleet rules and tools of the running office ship in `templates/` (exported nightly, anonymised) and are seeded into a fresh tenant only where absent. **Rebuilding an existing office** (fresh box, GitHub + the encrypted backup): see [RESTORE.md](RESTORE.md).
+
 ## Why it's stable
 
 It keeps the **flat-rate** interactive `claude` runtime (tmux, under your Claude subscription — not
