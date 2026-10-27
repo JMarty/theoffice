@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,14 @@ import {
   MAX_OPTIONS,
 } from "./owner-cards.js";
 import { migrateOwnerCards } from "../../scripts/migrate-owner-cards.js";
+
+// deterministic config: tests must not depend on the tenant's real overrides
+const cfgState = vi.hoisted(() => ({ over: {} as Record<string, unknown> }));
+vi.mock("../config.js", async (orig) => {
+  const m = await orig<typeof import("../config.js")>();
+  return { ...m, loadConfig: () => { const c = m.loadConfig(); return { ...c, owner: { ...c.owner, handle: undefined }, briefingSections: undefined, briefingHealthDenyExtra: undefined, ...cfgState.over }; } };
+});
+
 
 const AGENTS = ["cfo", "pam", "darryl", "marveen"];
 let dir: string;
