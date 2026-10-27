@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# agent-msg TO "message"   (see agent_msg.py): sends over the bus, exits 1 loudly if it was not accepted.
+exec python3 "$(dirname "$(readlink -f "$0")")/agent_msg.py" "$@"
