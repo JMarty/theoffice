@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineConfig, ScheduledTaskType } from "../types.js";
 import { enqueueInbound } from "../queue/index.js";
+import { isFrozen } from "../fleet/freeze.js";
 import { sendAgentMessage } from "../bus/index.js";
 import { guardDecision } from "../quota/guard.js";
 import { alarmDigest, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
@@ -124,6 +125,7 @@ function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: s
 
 /** Retry parked (quota-deferred) occurrences: fire when the guard lets them through, or unconditionally once maxDeferMin has passed. */
 export function retryDeferred(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // fleet freeze: parked occurrences stay parked
   const maxMs = (cfg.quotaGuard?.maxDeferMin ?? DEFER_MAX_MIN_DEFAULT) * 60_000;
   let fired = 0;
   for (const [key, d] of [...deferred]) {
@@ -135,6 +137,7 @@ export function retryDeferred(cfg: EngineConfig, nowMs: number): number {
 
 /** Alarm the main agent with ONE digest (each run once) about task runs that fired but were never marked complete. */
 export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // nothing can complete while frozen, so nothing is overdue
   if (cfg.taskCompletion?.enabled === false || cfg.taskCompletion?.alarm === false) return 0; // shadow mode: instruction + records, no alarm
   const db = getDb();
   const nowSec = Math.floor(nowMs / 1000);
@@ -150,6 +153,7 @@ export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
 
 /** Fire any tasks due in the current minute (idempotent via inbound dedup key). */
 export function fireDueTasks(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // fleet freeze: no new agent work
   const tasks = loadScheduledTasks(cfg).filter((t) => t.enabled && t.prompt);
   const mk = minuteKey(nowMs);
   let fired = 0;
@@ -185,6 +189,7 @@ function setLastTick(ms: number): void {
  * task (not a backlog replay) so a frequent task can't flood the fleet after a long outage.
  */
 export function catchUpMissed(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0;
   const lastTick = getLastTick();
   if (lastTick == null) return 0; // first boot ever -> no prior run to catch up from
   const since = Math.max(lastTick, nowMs - CATCHUP_MAX_MS);

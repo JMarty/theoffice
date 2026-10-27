@@ -3,7 +3,8 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import type { EngineConfig } from "../types.js";
 import { loadAgents, slackAgents } from "../agents.js";
-import { enqueueInbound } from "../queue/index.js";
+import { enqueueInbound, enqueueOutbound } from "../queue/index.js";
+import { handleOwnerFreezeCommand } from "../fleet/freeze.js";
 import { isAllowedSender } from "./access.js";
 import { downloadFiles } from "./files.js";
 import { log } from "../logger.js";
@@ -339,6 +340,16 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
       if (!isAllowedSender(parsed.user, agent.allowFrom, ownerId)) {
         logger.warn({ agent: agent.id, from: parsed.user }, "ignored non-allowed sender (DM or channel @-mention)");
         return;
+      }
+      // Fleet freeze / unfreeze: the owner's own DM words. Handled here, in the engine, so it works while every agent is frozen, and the
+      // sender must be the owner's verified Slack user id (an agent cannot post as the owner). Never forwarded to an agent.
+      if (parsed.channel.startsWith("D")) {
+        const reply = handleOwnerFreezeCommand(cfg, parsed.text, parsed.user);
+        if (reply != null) {
+          enqueueOutbound(agent.id, parsed.channel, reply);
+          logger.warn({ agent: agent.id }, "owner fleet freeze command handled");
+          return;
+        }
       }
       // Instant "I've seen this" feedback so the owner isn't left wondering — react
       // 👀 the moment we accept the message, well before the agent finishes thinking.

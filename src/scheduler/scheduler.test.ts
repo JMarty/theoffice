@@ -263,5 +263,22 @@ describe("quota guard wiring", () => {
     getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
     getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
     expect(fireDueTasks(mkCfg(undefined), T + 180_000)).toBe(3);
+describe("fleet freeze wiring", () => {
+  it("while frozen the scheduler fires nothing, catches up nothing, retries nothing and alarms nothing", async () => {
+    const { mkdtempSync: mk, rmSync: rm } = await import("node:fs");
+    const { freezeFleet, unfreezeFleet } = await import("../fleet/freeze.js");
+    const sdir = mk(join(tmpdir(), "office-frz-"));
+    const fcfg = { ...cfg, paths: { ...cfg.paths, storeDir: sdir } } as EngineConfig;
+    const T = Date.parse("2026-06-25T10:00:00Z");
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n;
+    freezeFleet(fcfg, "test", "toby");
+    expect(fireDueTasks(fcfg, T)).toBe(0);
+    expect(catchUpMissed(fcfg, T)).toBe(0);
+    expect(sweepUnfinished(fcfg, T)).toBe(0);
+    expect(retryDeferred(fcfg, T)).toBe(0);
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n).toBe(before);
+    unfreezeFleet(fcfg);
+    expect(fireDueTasks(fcfg, T)).toBeGreaterThan(0); // thawed: the same call fires
+    rm(sdir, { recursive: true, force: true });
   });
 });

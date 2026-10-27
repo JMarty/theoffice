@@ -4,6 +4,7 @@ import { hasSession, sessionNameFor } from "./tmux.js";
 import { listQueued, markFailed } from "../queue/index.js";
 import { loadAgents } from "../agents.js";
 import { runtimeFor } from "./runtime.js";
+import { isFrozen } from "../fleet/freeze.js";
 
 const logger = log("session");
 
@@ -52,6 +53,7 @@ export function startDeliverer(cfg: EngineConfig): () => void {
 
   const tick = async () => {
     if (stopped) return;
+    if (isFrozen(cfg)) return; // fleet freeze: hand nothing to any agent; the queue keeps and drains on thaw
     // P0#4: if the previous tick is still in flight, skip this one. Without this, a slow tick lets the
     // next interval fire concurrently and the same queued item is read+delivered twice (double-inject).
     if (running) return;

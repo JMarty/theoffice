@@ -95,6 +95,7 @@ import {
   sendTray,
 } from "./owner-cards.js";
 import { checkDoneEvidence } from "./kanban-evidence.js";
+import { freezeFleet, freezeState } from "../fleet/freeze.js";
 import { archiveCard, cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
 import { log } from "../logger.js";
 
@@ -775,6 +776,21 @@ async function handleApi(
     if (mv.result === "notfound") return json(res, 404, { error: "card not found", id });
     if (mv.result === "conflict") return json(res, 409, { error: "card is not in the expected status", id, expected_status: expected, current_status: mv.current });
     return json(res, 200, { ok: true, id });
+  }
+
+  // --- fleet freeze (the red button). Any dashboard-token holder, including an agent, may FREEZE; there is deliberately NO unfreeze route:
+  // every agent holds this token, so thawing is the owner's Slack command (src/fleet/freeze.ts) or deleting <store>/fleet-freeze.json on the box.
+  if (path === "/api/fleet/freeze" && m === "GET") return json(res, 200, freezeState(cfg));
+  if (path === "/api/fleet/freeze" && m === "POST") {
+    const raw = await readBody(req, res); if (raw === null) return;
+    const b = parseJson(raw) ?? {};
+    const by = actorOf(req, b) ?? "unknown";
+    const was = freezeState(cfg).frozen;
+    const s = freezeFleet(cfg, typeof b.reason === "string" && b.reason.trim() ? b.reason.trim() : "no reason given", by);
+    if (!was && cfg.owner.slackUserId) {
+      enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet FROZEN by ${by}: ${s.reason}. No agent can run a tool and no scheduled work starts. Reply "unfreeze fleet" to thaw.`);
+    }
+    return json(res, 200, s);
   }
 
   // --- kanban audit trail : GET /api/kanban/<id>/events -> {status:[...], fields:[...]} ---
