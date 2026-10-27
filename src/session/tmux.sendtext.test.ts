@@ -38,7 +38,7 @@ describe("sendText option-terminator", () => {
 
   it("passes a hyphen-leading burst through as payload, not as a flag", () => {
     // exactly the shape that wedged the fleet: a memory-preamble bullet at a chunk boundary
-    const burst = "- (hot) HOLLAND KONYVELO MEGVAN (2026-07-31): Jane Doe";
+    const burst = "- (hot) ACCOUNTANT CONFIRMED (2026-01-01): Jane Doe";
     sendText("theoffice", "agent-x", burst);
     const argv = argvOfLastCall();
     expect(argv.at(-1)).toBe(burst);
