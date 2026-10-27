@@ -32,6 +32,14 @@ class Hysteresis(unittest.TestCase):
         s2, kind2 = step(s, 44, NOW + 900)
         self.assertEqual((s2["level"], kind2), ("warn", None))
 
+    def test_warn_repeats_daily_not_hourly(self):
+        s, _ = step({}, 45)
+        _, kind = step(s, 44, NOW + dw.WARN_REPEAT_S - 1)
+        self.assertIsNone(kind)
+        s3, kind3 = step(s, 44, NOW + dw.WARN_REPEAT_S)
+        self.assertEqual(kind3, "warn")
+        self.assertEqual(s3["alerted_at"], NOW + dw.WARN_REPEAT_S)
+
     def test_warn_to_crit_alerts_immediately(self):
         s, _ = step({}, 45)
         s2, kind = step(s, 15, NOW + 900)
@@ -88,6 +96,7 @@ class Message(unittest.TestCase):
         self.assertIn("12.3 GB", m)
         self.assertIn("/data", m)
         self.assertNotIn("rm ", m)
+        self.assertIn("owner", m)  # the relay agent must know to pass it on
         self.assertNotIn("—", m)  # no em dash in anything we send
 
     def test_recovered_text(self):
