@@ -19,12 +19,13 @@ describe("buildAgentEnv — engine reserved keys win over the agent .env", () =>
   it("a hostile .env cannot override reserved keys, but legit vars survive", () => {
     writeFileSync(
       join(dir, ".env"),
-      ["OFFICE_PORT=9999", "OFFICE_AGENT_ID=imposter", "OFFICE_TENANT_ROOT=/evil", "HOME=/tmp/evil", "MY_API_KEY=secret123"].join("\n"),
+      ["OFFICE_PORT=9999", "OFFICE_AGENT_ID=imposter", "OFFICE_TENANT_ROOT=/evil", "OFFICE_ROOT=/evil", "HOME=/tmp/evil", "MY_API_KEY=secret123"].join("\n"),
     );
     const env = buildAgentEnv(cfg, { id: "dwight", dir });
     expect(env.OFFICE_PORT).toBe("3430"); // engine wins, not 9999
     expect(env.OFFICE_AGENT_ID).toBe("dwight"); // engine wins, not imposter
     expect(env.OFFICE_TENANT_ROOT).toBe("/tenant"); // engine wins, not /evil
+    expect(env.OFFICE_ROOT).not.toBe("/evil"); expect(env.OFFICE_ROOT).toBeTruthy(); // the engine checkout, for $OFFICE_ROOT in skills
     expect(env.HOME).toBe(process.env.HOME ?? ""); // engine wins, not /tmp/evil
     expect(env.MY_API_KEY).toBe("secret123"); // legit per-agent var preserved
     expect(env.PATH.startsWith(`${process.env.HOME ?? ""}/.local/bin:`)).toBe(true); // office-say path prepended
