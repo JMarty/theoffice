@@ -79,6 +79,10 @@ export interface EngineConfig {
   cleanResetScript?: string;
   /** scheduled-task completion: runs carry an id + completion instruction; unfinished `task` runs alarm the main agent once (heartbeats never) */
   taskCompletion?: { enabled?: boolean; alarm?: boolean; alarmAfterMin?: number; alarmMaxAgeH?: number };
+  /** quota guard: defer BACKGROUND (heartbeat) work when the Claude quota is nearly spent. Off by default; shadow mode logs what it would defer, enforce mode defers. Owner-facing work always runs; any unknown state fails open. */
+  quotaGuard?: { enabled?: boolean; mode?: "shadow" | "enforce"; deferAtPercent?: number; nearResetPercent?: number; credentialsFile?: string };
+  /** several Claude plans: move the fleet to another when the active one is spent. mode "observe" (default) only reports; "act" swaps the live credentials file. */
+  claudePlans?: { mode?: "observe" | "act"; rotateAtPercent?: number; plans: { id: string; credentialsFile: string }[] };
   /** briefing-board section keys this tenant accepts (replaces the built-in default list) */
   briefingSections?: string[];
   /** extra identifiers the shipped-template leak check must reject (owner nickname, private repo names ...) */

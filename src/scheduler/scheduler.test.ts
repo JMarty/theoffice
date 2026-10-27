@@ -188,3 +188,47 @@ describe("task completion wiring", () => {
   });
 
 });
+
+describe("quota guard wiring", () => {
+  const T = Date.parse("2026-06-24T10:00:00Z");
+  const hot = { source: "authoritative", fetchedAtMs: Date.now(), fiveHour: { usedPercent: 97, resetsAtMs: Date.now() + 3600_000 }, sevenDay: null };
+  const mkCfg = (guard: EngineConfig["quotaGuard"]): EngineConfig => {
+    const tdir = join(root, `scheduled-tasks-q-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(tdir, "hb"), { recursive: true });
+    mkdirSync(join(tdir, "report"), { recursive: true });
+    mkdirSync(join(tdir, "chore"), { recursive: true });
+    writeFileSync(join(tdir, "hb", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "heartbeat", prompt: "silent check" }));
+    writeFileSync(join(tdir, "report", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "task", prompt: "report to owner" }));
+    writeFileSync(join(tdir, "chore", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "task", quota: "background", prompt: "background chore" }));
+    return { ...cfg, paths: { ...cfg.paths, scheduledTasksDir: tdir }, quotaGuard: guard };
+  };
+  const firedNames = () => (getDb().prepare(`SELECT name FROM task_runs WHERE agent='qagent'`).all() as { name: string }[]).map((r) => r.name).sort();
+
+  it("enforce + pressure: heartbeat and quota:background task are deferred, the owner report still fires, and no run row is left", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true, mode: "enforce" }), T)).toBe(1);
+    expect(firedNames()).toEqual(["report"]);
+  });
+
+  it("shadow mode fires everything even under pressure", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true }), T + 60_000)).toBe(3);
+  });
+
+  it("guard disabled (default) or no snapshot: everything fires", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(null);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true, mode: "enforce" }), T + 120_000)).toBe(3);
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg(undefined), T + 180_000)).toBe(3);
+  });
+});

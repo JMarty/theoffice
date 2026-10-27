@@ -5,6 +5,7 @@ import { deliverPendingSetupNotices } from "./web/setup-notices.js";
 import { startSlackIngest } from "./channel/slack-ingest.js";
 import { startSlackSender } from "./channel/slack-send.js";
 import { startScheduler } from "./scheduler/index.js";
+import { startQuotaRefresher } from "./quota/guard.js";
 import { startOwnerBoardBatch } from "./web/owner-cards.js";
 import { startBus } from "./bus/index.js";
 import { startServer } from "./web/server.js";
@@ -61,8 +62,10 @@ async function main(): Promise<void> {
   // prompt (heartbeats are scheduled tasks of type 'heartbeat' — flat-rate, no SDK).
   if (process.env.OFFICE_SCHEDULER_PAUSED)
     logger.warn("OFFICE_SCHEDULER_PAUSED set — scheduler/heartbeats NOT started (incident mode)");
-  else
+  else {
+    stops.push(startQuotaRefresher(cfg)); // off unless quotaGuard.enabled; fire decisions fail open until its first snapshot lands
     stops.push(startScheduler(cfg));
+  }
   // Owner Board batch send (spec §5): engine-timer, NOT a scheduled task — a scheduled task would wake
   // an agent (tokens) just to check whether anything is due.
   stops.push(startOwnerBoardBatch(cfg));

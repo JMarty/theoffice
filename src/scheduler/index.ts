@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { EngineConfig, ScheduledTaskType } from "../types.js";
 import { enqueueInbound } from "../queue/index.js";
 import { sendAgentMessage } from "../bus/index.js";
+import { guardDecision } from "../quota/guard.js";
 import { alarmDigest, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
 import { getDb } from "../db/index.js";
 import { isDueNow, minuteKey, lastOccurrenceBefore } from "./cron.js";
@@ -23,6 +24,8 @@ export interface ScheduledTask {
   type: ScheduledTaskType; // 'task' (always reports) | 'heartbeat' (notify only if important)
   enabled: boolean;
   prompt: string;
+  /** 'background' marks a task nobody is waiting on, so the quota guard may defer it like a heartbeat */
+  quota?: "background";
 }
 
 interface TaskConfig {
@@ -33,6 +36,7 @@ interface TaskConfig {
   type?: ScheduledTaskType;
   enabled?: boolean;
   prompt?: string;
+  quota?: string;
 }
 
 /**
@@ -68,6 +72,7 @@ export function loadScheduledTasks(cfg: EngineConfig): ScheduledTask[] {
       type: tc.type === "heartbeat" ? "heartbeat" : "task",
       enabled: tc.enabled !== false,
       prompt,
+      ...(tc.quota === "background" ? { quota: "background" as const } : {}),
     });
   }
   return out;
@@ -86,6 +91,13 @@ function wrap(task: ScheduledTask, runId?: number): string {
  * a deduped enqueue (same minute already fired) removes the row again, so a duplicate never leaves an open orphan.
  */
 function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string): number | undefined {
+  // Quota guard: only background work (heartbeats, tasks marked quota:"background") can be deferred; tasks that report to the owner always run.
+  const g = guardDecision(cfg, t.type === "heartbeat" || t.quota === "background" ? "background" : "owner-facing", Date.now());
+  if (!g.run) {
+    logger.warn({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard: background work deferred");
+    return undefined;
+  }
+  if (g.wouldDefer) logger.info({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard (shadow): would defer");
   const db = getDb();
   const completion = cfg.taskCompletion?.enabled !== false;
   const run = db
