@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, closeDb, getDb } from "../db/index.js";
-import { createCard, moveCard, patchCard, cardEvents } from "./kanban-audit.js";
+import { createCard, moveCard, patchCard, archiveCard, cardEvents } from "./kanban-audit.js";
 
 let dir: string;
 beforeEach(() => {
@@ -88,6 +88,26 @@ describe("moveCard", () => {
     const id = card();
     moveCard(db(), id, "waiting", {});
     expect(cardEvents(db(), id).status.at(-1)!.actor).toBeNull();
+  });
+});
+
+describe("archiveCard (who closed it)", () => {
+  it("archives, and records an archived_at field event with the actor", () => {
+    const id = card();
+    expect(archiveCard(db(), id, "bob").result).toBe("ok");
+    expect((db().prepare(`SELECT archived_at FROM kanban_cards WHERE id=?`).get(id) as { archived_at: number | null }).archived_at).not.toBeNull();
+    const f = cardEvents(db(), id).fields;
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ field: "archived_at", old_value: null, actor: "bob" });
+    expect(Number(f[0]!.new_value)).toBeGreaterThan(0);
+  });
+
+  it("archiving twice writes the event once (the second is a no-op for the audit trail) and an unknown card is notfound", () => {
+    const id = card();
+    archiveCard(db(), id, "bob");
+    archiveCard(db(), id, "carol");
+    expect(cardEvents(db(), id).fields).toHaveLength(1);
+    expect(archiveCard(db(), "nope", "bob").result).toBe("notfound");
   });
 });
 

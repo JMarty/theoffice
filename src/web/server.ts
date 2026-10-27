@@ -95,7 +95,7 @@ import {
   sendTray,
 } from "./owner-cards.js";
 import { checkDoneEvidence } from "./kanban-evidence.js";
-import { cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
+import { archiveCard, cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
 import { log } from "../logger.js";
 
 const logger = log("web");
@@ -785,8 +785,7 @@ async function handleApi(
   const ka = path.match(/^\/api\/kanban\/([^/]+)\/archive$/);
   if (ka && m === "POST") {
     const id = decodeURIComponent(ka[1]!);
-    const info = db.prepare(`UPDATE kanban_cards SET archived_at=unixepoch(), updated_at=unixepoch() WHERE id=?`).run(id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    if (archiveCard(db, id, actorOf(req, null)).result === "notfound") return json(res, 404, { error: "card not found", id });
     return json(res, 200, { ok: true, id });
   }
 

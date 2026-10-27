@@ -74,6 +74,20 @@ export function patchCard(db: DB, id: string, fields: PatchFields, actor?: strin
   })();
 }
 
+/** Archive (the card's close action). Same as the old route, plus one archived_at field event the first time; a repeat leaves the trail alone. */
+export function archiveCard(db: DB, id: string, actor?: string | null): { result: "ok" | "notfound" } {
+  return db.transaction((): { result: "ok" | "notfound" } => {
+    const cur = db.prepare(`SELECT archived_at FROM kanban_cards WHERE id = ?`).get(id) as { archived_at: number | null } | undefined;
+    if (!cur) return { result: "notfound" };
+    db.prepare(`UPDATE kanban_cards SET archived_at = unixepoch(), updated_at = unixepoch() WHERE id = ?`).run(id);
+    if (cur.archived_at == null) {
+      const now = (db.prepare(`SELECT archived_at FROM kanban_cards WHERE id = ?`).get(id) as { archived_at: number }).archived_at;
+      db.prepare(`INSERT INTO kanban_card_field_events (card_id, field, old_value, new_value, actor) VALUES (?, 'archived_at', NULL, ?, ?)`).run(id, String(now), actor ?? null);
+    }
+    return { result: "ok" };
+  })();
+}
+
 export interface StatusEvent { id: number; card_id: string; from_status: string | null; to_status: string; actor: string | null; created_at: number }
 export interface FieldEvent { id: number; card_id: string; field: string; old_value: string | null; new_value: string | null; actor: string | null; created_at: number }
 
