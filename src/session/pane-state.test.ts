@@ -128,10 +128,10 @@ describe("shouldRetrySubmit / decideSubmitFollowup", () => {
 });
 
 /**
- * 2026-08-04: dwight + marveen went silent ~20 min. The delivery worker typed each owner message in but
+ * : dwight + marveen went silent ~20 min. The delivery worker typed each owner message in but
  * the submit Enter was dropped; the message sat parked, yet the confirm loop marked it DELIVERED. Root
  * cause: "done" was returned whenever the payload was not VISIBLY parked — and a TALL parked payload
- * (dwight's message carried a `[Pasted text]` block of 8 photos) pushes the input box's top separator off
+ * pushes the input box's top separator off
  * the captured pane, so liveInputBoxRange returns null and the old shouldRetrySubmit read false = "done".
  * The mirror of the pre-send inversion. The fix makes "done" require POSITIVE proof of submission.
  */
@@ -402,7 +402,7 @@ describe("stripPaneStyling — the plain view must survive the -e capture", () =
 });
 
 describe("detectsUsageLimitModal — dismissable ONLY when Stop-and-wait is highlighted", () => {
-  // Real 2026-08-04 shape (marveen/dwight/toby): cursor `❯` on option 1.
+  // Real shape: cursor `❯` on option 1.
   const HIGHLIGHT_ON_STOP = pane(
     "  ✻ Cooked for 1m 19s",
     "  You've hit your session limit · resets 6:20am",
@@ -411,7 +411,7 @@ describe("detectsUsageLimitModal — dismissable ONLY when Stop-and-wait is high
     "     2. Upgrade your plan",
     "   Enter to confirm · Esc to cancel",
   );
-  // THE DANGEROUS ONE (Toby's required test, Michael 9274): cursor `❯` on Upgrade. Enter here would
+  // THE DANGEROUS ONE: cursor `❯` on Upgrade. Enter here would
   // spend the owner's money — the detector MUST refuse so the sweeper never presses it.
   const HIGHLIGHT_ON_UPGRADE = pane(
     "   What do you want to do?",

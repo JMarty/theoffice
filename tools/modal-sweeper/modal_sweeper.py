@@ -206,7 +206,7 @@ def sweep(dry_run: bool) -> int:
                 log(f"DRY-RUN would-dismiss agent={session} match='❯ 1. Stop and wait for limit to reset' (Enter, Stop-and-wait)")
                 acted += 1
                 continue
-            # Ground-truth capture (Toby 9290): record the exact matched modal lines the FIRST time we
+            # Ground-truth capture: record the exact matched modal lines the FIRST time we
             # act on a real one, so we have real-world proof classify() fires on the live modal — not
             # just on the fixture — and can confirm `❯` is genuinely the selection marker.
             matched = "\n".join(l for l in pane.splitlines() if ("Stop and wait for limit to reset" in l or "Upgrade your plan" in l))

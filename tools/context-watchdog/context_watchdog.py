@@ -108,7 +108,7 @@ def alert(agent, pct):
         body = json.dumps({"from":"context-watchdog","to":"darryl","content":msg}).encode()
         urllib.request.urlopen(urllib.request.Request(API, data=body,
             headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json"}), timeout=10)
-        # one short line to marveen per real compact (owner/marveen 2026-10-23)
+        # one short line to marveen per real compact
         body = json.dumps({"from":"darryl","to":"marveen","content":f"CTX-COMPACT {agent} {pct}% (idle, gate ok)"}).encode()
         urllib.request.urlopen(urllib.request.Request(API, data=body,
             headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json"}), timeout=10)

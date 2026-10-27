@@ -278,7 +278,7 @@ async function deliverClaude(cfg: EngineConfig, agent: AgentDef, item: QueuedIte
   } else if (item.attempts + 1 >= MAX_DELIVERY_ATTEMPTS) {
     // +1: item.attempts is the PRE-markDelivering snapshot; this failing delivery already burned an
     // attempt, so give up when THIS is the MAX-th try. Without the +1 a row failed on its 6th attempt
-    // against a max of 5 (the off-by-one Toby flagged).
+    // against a max of 5.
     markFailed(item.id, res.reason ?? "unknown");
     logger.warn({ id: item.id, agent: item.agent_id, reason: res.reason }, "delivery failed (max attempts)");
   } else {

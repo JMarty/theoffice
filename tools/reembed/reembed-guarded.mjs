@@ -42,7 +42,7 @@ const flag = (n) => process.argv.includes(n);
 // the owner chose 100 as the *progress* unit and later approved smaller batches; we honour both by
 // checking every row and REPORTING every PROGRESS_EVERY rows.
 const BATCH_REQ = arg("--batch", 1);
-// F4 (Toby + Darryl): BATCH *IS* the check cadence, so a well-meaning "speed it up" flag would
+// F4: BATCH *IS* the check cadence, so a well-meaning "speed it up" flag would
 // silently disable the safety property. backfillEmbeddings(N) embeds N rows internally with NO
 // health check between them, so --batch 50 blinds the guard for ~3 minutes — the exact sampler
 // blindness that rebooted the box. Refuse it unless the caller states the consequence out loud.
@@ -56,7 +56,7 @@ const PAUSE_MS = arg("--pause", 250);
 // from under us — two guards with different thresholds is how you get shed/reload thrash.
 const SWAP_PAUSE = arg("--swap-pause", 1800);
 const SWAP_RESUME = arg("--swap-resume", 1500);
-// DERIVED, not a placeholder (Toby's ordering point + the 60-row pilot numbers). Measured pilot
+// DERIVED, not a placeholder. Measured pilot
 // peak was 1146 MiB against a 1145 baseline, i.e. the job contributes ~1 MiB. 2600 was WRONG
 // because it sat ABOVE oomwatch's 2048 shed point, so the ordering was: we pause at 1800, oomwatch
 // SHEDS bge-m3 out from under a still-running job at 2048, and only then do we abort at 2600 —
@@ -69,13 +69,10 @@ const MAX_PAUSE_MS_TOTAL = arg("--max-pause-total", 20 * 60 * 1000); // reportin
 const MAX_STUCK_MS = arg("--max-stuck", 20 * 60 * 1000);   // CONSECUTIVE no-progress -> abort
 const PILOT = arg("--pilot", 0); // stop after N rows, for the measured pilot
 
-// HARD WALL-CLOCK DEADLINE. The morning briefing does NOT fire at a fixed hour: morning-briefing-arm
-// runs at 06:00, reads the owner's wake-up time, and rewrites the briefing cron to
-// wake-up+30min (sanity floor 06:30, fallback 07:30). So the briefing can land as early as 06:30 and
-// we cannot know when until 06:00. If this job is still saturating ollama then, briefing recalls
-// queue behind our embeds and the hybrid path silently degrades to keyword-only — a quietly worse
-// briefing, which is exactly the kind of damage nobody would notice. So we stop cleanly BEFORE the
-// arm even runs. Stopping early is free: the job is resumable and the remaining rows stay
+// HARD WALL-CLOCK DEADLINE. A scheduled morning job may start at an hour that cannot be known in advance.
+// If this job is still saturating ollama then, that job's recalls queue behind our embeds and the hybrid path
+// silently degrades to keyword-only: a quietly worse result nobody would notice. So we stop cleanly BEFORE
+// the earliest possible start. Stopping early is free: the job is resumable and the remaining rows stay
 // wrong-dimension until the next run. --deadline HH:MM local, empty string disables.
 const DEADLINE = (() => {
   const i = process.argv.indexOf("--deadline");
@@ -122,7 +119,7 @@ async function bus(content) {
   try {
     const root = process.env.OFFICE_TENANT_ROOT ?? new URL("../../tenant", import.meta.url).pathname;
     const token = readFileSync(`${root}/store/.dashboard-token`, "utf8").trim();
-    // F2 (Toby): HARD TIMEOUT. On an ABORT the box is thrashing — that is WHY we are aborting —
+    // F2: HARD TIMEOUT. On an ABORT the box is thrashing — that is WHY we are aborting —
     // and the dashboard is under the same pressure, so an untimed fetch can block at exactly the
     // moment this process must DIE to release its memory. Releasing memory must never be gated on
     // a network call to a box that is out of memory. oomwatch's bus POST uses timeout=15; this is
@@ -208,7 +205,7 @@ for (;;) {
   // ---- one guarded increment
   const r = await backfillEmbeddings(BATCH);
 
-  // DONE IS PROVEN BY THE COVERAGE NUMBER, NOT BY THE LOOP EXITING (Toby). An empty batch is the
+  // DONE IS PROVEN BY THE COVERAGE NUMBER, NOT BY THE LOOP EXITING. An empty batch is the
   // loop's opinion; countEmbeddings() is the ground truth. If the select returns nothing but rows
   // are still wrong-dimension, something is wrong with the predicate or the DB, and reporting
   // COMPLETE there would be exactly the silent-partial-success this whole guard exists to prevent.

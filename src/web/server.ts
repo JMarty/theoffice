@@ -35,7 +35,7 @@ import { normalizeEffort } from "../session/effort.js";
 
 // Live context fill % from the agent's most-recent Claude Code session transcript — reads the
 // last turn's token usage (input + cache) against the context window. Token-free (no /context
-// call). Window = 1M, matching Claude Code's own /context readout (verified on cfo + marveen).
+// call). Window = 1M, matching Claude Code's own /context readout.
 // null if unreadable.
 const CONTEXT_WINDOW = 1000000;
 function contextPctFromTranscript(agentDir: string): number | null {

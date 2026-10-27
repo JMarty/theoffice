@@ -31,7 +31,7 @@ export type PaneState = "idle" | "busy" | "typing" | "unknown" | "error";
  * The earlier regex required the shell count to be immediately followed by its
  * tail, so a footer with an intervening segment — or a truncated tail — read
  * `unknown` and the agent got ZERO deliveries while a background shell ran
- * (2026-07-30 incident: dwight went deaf to the owner + scheduled tasks for hours).
+ *.
  */
 const IDLE_FOOTER_RX =
   /⏵⏵[^\n]*bypass permissions on\b|bypass permissions on\b[^\n]*?(?:\(shift\+tab to cycle\)|↓ to manage)|\? for shortcuts/;
@@ -128,7 +128,7 @@ export function detectPaneState(pane: string): PaneState {
 // verified, never assumed.
 //
 // The highlight marker is `❯` immediately before the option, verified against the REAL 2026-08-04
-// captures (marveen, dwight, toby all rendered `❯ 1. Stop and wait for limit to reset`), not just the
+// captures, not just the
 // test fixture. STOP_HIGHLIGHTED anchors `❯` to the Stop-and-wait line; UPGRADE_PRESENT confirms this
 // really is the usage-limit menu (that label never appears elsewhere).
 const USAGE_LIMIT_STOP_HIGHLIGHTED_RX = /❯\s*1\.\s*Stop and wait for limit to reset/;
@@ -178,7 +178,7 @@ export function detectsUnsafeUsageLimitModal(pane: string): boolean {
 // on these and leaves the pane exactly as it is; a human decides. The strings are Claude Code's own
 // approval-menu wording, which never appears in the usage-limit menu. Agents run
 // --dangerously-skip-permissions, so these are rare — but Claude Code still surfaces a gate for
-// operations it deems dangerous (a real one froze cfo on an `rm -f "$WORK"/*.pdf` on 2026-08-04), which
+// operations it deems dangerous, which
 // is exactly why one appearing must be surfaced loudly rather than left to sit silently.
 const PERMISSION_PROMPT_RX =
   /No, and tell Claude what to do differently|Yes, and (?:don't|do not) ask again|Do you want to (?:proceed|make this edit|create|run|allow)/;
@@ -408,7 +408,7 @@ export function shouldRetrySubmit(pane: string, payloadHint: string, opts: { min
  * function also returns false when the input box cannot be LOCATED (liveInputBoxRange === null), and the
  * box goes unlocatable exactly when a TALL parked payload pushes its top separator off the captured pane.
  * So a long owner message that never submitted (its Enter was dropped) read as delivered and the agent
- * sat silent — dwight (a message plus a `[Pasted text]` block of 8 photos) and marveen, 2026-08-04, ~20
+ * sat silent — dwight (a message plus a `[Pasted text]` block of 8 photos) and marveen, 
  * min of owner-visible silence. This is the same "a box we cannot SEE is not proof" inversion the PRE-send
  * gate already fixed in inputBoxProvablyEmptyStyled; the confirm side needs the mirror of it.
  *
@@ -448,7 +448,7 @@ export function safeToResubmit(pane: string): boolean {
  * placeholder, the agent is NOT working (idle footer, no busy signal). detectPaneState reads this pane as
  * "busy" (a pending paste never auto-submits), so the deliverer gates shut behind it, and the only Enter
  * that was ever going to submit it belonged to the delivery that has already given up. Nothing else
- * presses it: on 2026-10-24 toby sat deaf from 08:27 to 14:02 and darryl from 08:25 until a human pressed
+ * presses it: on toby sat deaf from 08:27 to 14:02 and darryl from 08:25 until a human pressed
  * Enter (2h15), each behind one such placeholder, while the bus queued everything behind them.
  *
  * Pure and deliberately narrow: idle footer present, NO busy indicator, and the placeholder is inside the

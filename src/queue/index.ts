@@ -101,7 +101,7 @@ export interface ReapResult {
  * markDelivered/markFailed/requeue, so it is orphaned and would sit forever. MUST run BEFORE
  * startDeliverer, while nothing else writes the queue, so it is race-free. Idempotent.
  *
- * Poison-message guard (Toby): a message that crashes the ENGINE mid-delivery never reaches a runtime's
+ * Poison-message guard: a message that crashes the ENGINE mid-delivery never reaches a runtime's
  * terminal handler, so decideOutcome never gets to fail it on budget — an unconditional requeue would
  * loop reap->deliver->markDelivering(attempts++)->crash->reap forever. So FAIL the rows that have already
  * burned the full budget first, THEN requeue the rest for a normal bounded retry.
@@ -249,7 +249,7 @@ export function markOutboundSent(id: number): void {
 }
 
 export function markOutboundFailed(id: number, err: string): void {
-  // DEFENCE IN DEPTH (Toby): `AND status='sending'` so this can only ever touch a CLAIMED row. It
+  // DEFENCE IN DEPTH: `AND status='sending'` so this can only ever touch a CLAIMED row. It
   // can never resurrect a terminal row — a 'sent' row can never be flipped back to 'queued' and
   // re-posted by any future caller, independent of the try-split in slack-send.ts that protects the
   // one current call site. Idempotent: a second call on an already-failed/sent row is a no-op.

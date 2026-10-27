@@ -114,7 +114,7 @@ def detect_undelivered(now, conn):
     # detector above is blind to this (it requires delivered_at IS NOT NULL). Here we
     # flag channel messages queued+undelivered longer than the window while the agent's
     # session is still alive (so it's a hold/unreachable, not simply an offline agent).
-    # Exclude the detector's own agent (darryl): a self-alert can't be acted on while darryl is
+    # Exclude the detector's own agent: a self-alert can't be acted on while darryl is
     # busy, and darryl legitimately runs long polling shells -> would be pure self-noise.
     cur = conn.cursor()
     rows = cur.execute("""
@@ -132,7 +132,7 @@ def detect_undelivered(now, conn):
         # the message is either in-flight (delivered to the session, delivered_at not yet written) or
         # queued behind the current turn and will land when it ends -> NOT stuck. 2026-07-11 lesson:
         # marveen was actively composing a REPLY to the owner msg while the DB still showed it queued.
-        # The real rot case (Dwight's multi-hour bg shell) has an IDLE pane, so it still fires here.
+        # The real rot case has an IDLE pane, so it still fires here.
         if agent_alive(agent) and not agent_busy(agent):
             stuck.append({"inbound": iid, "agent": agent, "created_at": created,
                           "snippet": snippet, "stuck_min": round((now - created)/60, 1)})

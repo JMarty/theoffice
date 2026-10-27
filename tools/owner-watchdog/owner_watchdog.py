@@ -127,7 +127,7 @@ def run_once(dry=False, verbose=False, check_live=True):
     for r in rows:
         rid, agent, silent = r["id"], r["agent_id"], r["silent_sec"]
         mins = silent // 60
-        # ---- TURN-ENDED GATE (added 2026-09-25 after msg 17934 nudged marveen at ~6m while he was
+        # ---- TURN-ENDED GATE (added after msg 17934 nudged marveen at ~6m while he was
         # 20 min into a legitimate 9-part task). A still-working agent is SLOW, not unheard. Skip
         # WITHOUT stamping owner_alarmed_at, so the row is re-checked next cycle and alarms the
         # moment the turn ends still-silent -- the threshold stays fast for the real gap.

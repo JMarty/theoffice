@@ -115,7 +115,7 @@ function setLastTick(ms: number): void {
  * the single MOST-RECENT occurrence before the current minute; if it landed in the gap (lastTick, now]
  * (bounded to CATCHUP_MAX_MS) AND task_runs shows it did NOT already fire, we fire it once.
  *
- * No-double-fire (Toby's hard requirement): we (a) consult task_runs for that occurrence's minute BEFORE
+ * No-double-fire: we (a) consult task_runs for that occurrence's minute BEFORE
  * firing, and (b) enqueue with the SAME per-minute dedup key the on-time path uses, so an occurrence the
  * normal fire already handled is suppressed by both guards. We fire only the LATEST missed occurrence per
  * task (not a backlog replay) so a frequent task can't flood the fleet after a long outage.

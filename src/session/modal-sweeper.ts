@@ -7,7 +7,7 @@
 //      unheard. A single STATE-OBSERVER alarms the owner when a channel row is EITHER (a) dropped
 //      (status=failed) OR (b) still queued and undelivered past a threshold. (b) is the case the outage
 //      actually hit — messages parked behind a modal, never attempted, so never 'failed' — which an
-//      alarm keyed only on 'failed' would have missed entirely (Toby). It also backstops the modal
+//      alarm keyed only on 'failed' would have missed entirely. It also backstops the modal
 //      detectors failing open: if a future Claude Code changes the modal wording, nothing dismisses, the
 //      pane reads generic 'unknown', delivery gates shut — and the age alarm still fires. The alarm is
 //      PANE-INDEPENDENT (posted via the Slack bot to the owner, like auth-watchdog) because the failure
