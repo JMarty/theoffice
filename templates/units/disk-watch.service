@@ -4,4 +4,4 @@ Description=disk-watch: free-space watcher (statvfs, hysteresis, alerts the owne
 Type=oneshot
 Environment=OFFICE_TENANT_ROOT=@TENANT@
 ExecStart=/usr/bin/python3 @ROOT@/tools/disk-watch/disk_watch.py
-# Thresholds: DISK_WARN_GB (default 50), DISK_CRIT_GB (default 20), DISK_WATCH_PATH, DISK_WATCH_ALERT_TO. Override with a drop-in.
+# Thresholds: warn under 25% free, critical under 12% (DISK_WARN_PCT, DISK_CRIT_PCT); DISK_WARN_GB / DISK_CRIT_GB set absolute GB instead. DISK_WATCH_PATH, DISK_WATCH_ALERT_TO. Override with a drop-in.

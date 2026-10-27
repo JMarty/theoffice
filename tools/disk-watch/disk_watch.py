@@ -5,17 +5,18 @@ A full disk stops the whole fleet at once (no bus, no transcripts, no sends), us
 This runs from a systemd timer (no LLM), measures free space the way `df` does (statvfs f_bavail, never du)
 and tells the owner's relay agent over the bus when it gets low. It NEVER deletes anything.
 
-Levels: ok, warn (< DISK_WARN_GB, default 50), crit (< DISK_CRIT_GB, default 20). Hysteresis, so it never
+Levels: ok, warn (free below 25% of the volume by default), crit (below 12%). DISK_WARN_GB / DISK_CRIT_GB set an absolute
+free-GB threshold instead (each independently). Hysteresis, so it never
 alerts every run:
   - an alert goes out when the level gets worse (ok -> warn, ok/warn -> crit);
   - while crit it repeats at most every CRIT_REPEAT_S (60 min);
-  - it returns to ok only above warn + RECOVER_MARGIN_GB (10 GB), with one "back to normal" message.
+  - it returns to ok only above warn + 20% of warn, with one "back to normal" message.
 A failed send does not advance the state, so the alert is retried on the next run.
 
 Exit code: 0 whenever it measured (an alert is not a failure); 1 when it could not measure or save state.
 
 Env: DISK_WATCH_PATH (volume to watch, default the tenant root), DISK_WATCH_ALERT_TO (bus agent that relays
-to the owner, default marveen), DISK_WARN_GB, DISK_CRIT_GB, OFFICE_TENANT_ROOT, OFFICE_PORT.
+to the owner, default marveen), DISK_WARN_PCT, DISK_CRIT_PCT, DISK_WARN_GB, DISK_CRIT_GB, OFFICE_TENANT_ROOT, OFFICE_PORT.
 """
 import argparse
 import json
@@ -28,7 +29,6 @@ import urllib.request
 
 GB = 1024 ** 3
 CRIT_REPEAT_S = 3600
-RECOVER_MARGIN_GB = 10
 TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
 PORT = os.environ.get("OFFICE_PORT", "3430")
 ALERT_TO = os.environ.get("DISK_WATCH_ALERT_TO", "marveen")
@@ -54,18 +54,25 @@ def decide(prev, free_gb, now, warn_gb, crit_gb):
         if now - alerted_at >= CRIT_REPEAT_S:
             return {"level": "crit", "alerted_at": now}, "crit"
         return {"level": "crit", "alerted_at": alerted_at}, None
-    if prev_level != "ok" and free_gb >= warn_gb + RECOVER_MARGIN_GB:
+    if prev_level != "ok" and free_gb >= warn_gb * 1.2:
         return {"level": "ok", "alerted_at": now}, "recovered"
     return {"level": prev_level, "alerted_at": alerted_at}, None  # better but inside the margin: keep the worse level, stay quiet
+
+
+def thresholds(total_gb, env):
+    """-> (warn_gb, crit_gb). Percent of the volume by default (warn 25%, crit 12%); DISK_WARN_GB / DISK_CRIT_GB override each with an absolute value."""
+    warn = float(env["DISK_WARN_GB"]) if env.get("DISK_WARN_GB") else total_gb * float(env.get("DISK_WARN_PCT", "25")) / 100
+    crit = float(env["DISK_CRIT_GB"]) if env.get("DISK_CRIT_GB") else total_gb * float(env.get("DISK_CRIT_PCT", "12")) / 100
+    return warn, min(crit, warn)
 
 
 def message(kind, free_gb, total_gb, warn_gb, crit_gb, path):
     if kind == "recovered":
         return "[disk-watch] Disk free space is back to normal: %.0f GB free of %.0f GB on %s." % (free_gb, total_gb, path)
     if kind == "crit":
-        head = "[disk-watch] CRITICAL: %.1f GB free on %s (threshold %d GB). If it runs out the whole fleet stops." % (free_gb, path, crit_gb)
+        head = "[disk-watch] CRITICAL: %.1f GB free on %s (threshold %.0f GB). If it runs out the whole fleet stops." % (free_gb, path, crit_gb)
     else:
-        head = "[disk-watch] Warning: %.0f GB free on %s (threshold %d GB)." % (free_gb, path, warn_gb)
+        head = "[disk-watch] Warning: %.0f GB free on %s (threshold %.0f GB)." % (free_gb, path, warn_gb)
     return head + " Nothing was deleted; find what grew (du -sh on the biggest directories) and decide what to clear."
 
 
@@ -90,15 +97,13 @@ def bus_post(to, text):
         return False
 
 
-def main(argv=None, poster=bus_post, now=None):
+def main(argv=None, poster=bus_post, now=None, env=os.environ):
     ap = argparse.ArgumentParser(description="free-space watcher")
     ap.add_argument("--path", default=os.environ.get("DISK_WATCH_PATH", TENANT))
     ap.add_argument("--state", default=os.path.join(TENANT, "store", "disk-watch.json"))
     ap.add_argument("--free-gb", type=float, help="tests: use this instead of measuring")
     ap.add_argument("--dry-run", action="store_true", help="print the message, send and save nothing")
     args = ap.parse_args(argv)
-    warn_gb = float(os.environ.get("DISK_WARN_GB", "50"))
-    crit_gb = float(os.environ.get("DISK_CRIT_GB", "20"))
     try:
         usage = shutil.disk_usage(args.path)
     except OSError as e:
@@ -106,6 +111,7 @@ def main(argv=None, poster=bus_post, now=None):
         return 1
     free_gb = args.free_gb if args.free_gb is not None else usage.free / GB
     total_gb = usage.total / GB
+    warn_gb, crit_gb = thresholds(total_gb, env)
     try:
         prev = json.load(open(args.state))
     except (OSError, ValueError):

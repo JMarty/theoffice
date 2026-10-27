@@ -65,6 +65,22 @@ class Hysteresis(unittest.TestCase):
         self.assertEqual((s["level"], kind), ("ok", None))
 
 
+class Thresholds(unittest.TestCase):
+    def test_percent_defaults_scale_with_the_volume(self):
+        self.assertEqual(dw.thresholds(80.0, {}), (20.0, 9.6))
+        self.assertEqual(dw.thresholds(1000.0, {}), (250.0, 120.0))
+
+    def test_absolute_gb_overrides_percent(self):
+        self.assertEqual(dw.thresholds(80.0, {"DISK_WARN_GB": "20", "DISK_CRIT_GB": "10"}), (20.0, 10.0))
+
+    def test_one_absolute_one_percent_mixes_independently(self):
+        self.assertEqual(dw.thresholds(100.0, {"DISK_WARN_GB": "30"}), (30.0, 12.0))
+
+    def test_crit_never_above_warn(self):
+        w, c = dw.thresholds(100.0, {"DISK_CRIT_GB": "60", "DISK_WARN_GB": "30"})
+        self.assertLessEqual(c, w)
+
+
 class Message(unittest.TestCase):
     def test_text_names_level_free_space_and_never_offers_deletion(self):
         m = dw.message("crit", 12.3, 500.0, WARN, CRIT, "/data")
@@ -86,7 +102,7 @@ class Main(unittest.TestCase):
 
     def run_main(self, free, **kw):
         poster = kw.pop("poster", lambda to, text: self.sent.append((to, text)) or True)
-        return dw.main(["--state", self.state, "--free-gb", str(free)], poster=poster, now=kw.pop("now", NOW))
+        return dw.main(["--state", self.state, "--free-gb", str(free)], poster=poster, now=kw.pop("now", NOW), env={"DISK_WARN_GB": "50", "DISK_CRIT_GB": "20"})
 
     def test_alert_goes_to_the_configured_agent_and_state_is_saved(self):
         self.assertEqual(self.run_main(30), 0)
