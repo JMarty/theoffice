@@ -178,6 +178,33 @@ export const MIGRATIONS: Migration[] = [
           ALTER TABLE task_runs ADD COLUMN fired_at INTEGER;
           CREATE INDEX idx_task_runs_open ON task_runs(completed_at, ts);`,
   },
+  {
+    version: 10,
+    name: "kanban audit events",
+    // Who moved / changed a card, written in the same transaction as the change (src/web/kanban-audit.ts).
+    // kanban_card_events: one row per real status transition (from_status NULL = creation). kanban_card_field_events:
+    // one row per real change of an audited field (priority, project). Separate tables on purpose: a reader of status
+    // transitions must never read a field change as one. New tables -> migration-only (Model A), never SCHEMA_SQL.
+    sql: `CREATE TABLE kanban_card_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id     TEXT NOT NULL,
+            from_status TEXT,
+            to_status   TEXT NOT NULL,
+            actor       TEXT,
+            created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+          );
+          CREATE INDEX idx_kanban_events_card ON kanban_card_events(card_id, created_at);
+          CREATE TABLE kanban_card_field_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id     TEXT NOT NULL,
+            field       TEXT NOT NULL,
+            old_value   TEXT,
+            new_value   TEXT,
+            actor       TEXT,
+            created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+          );
+          CREATE INDEX idx_kanban_field_events_card ON kanban_card_field_events(card_id, created_at);`,
+  },
 ];
 
 /** Highest known schema version (the baseline, or the max migration version). */

@@ -1,6 +1,6 @@
 import { completeRun, OUTCOMES } from "../scheduler/completion.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { totalmem, freemem, cpus, loadavg, uptime as osUptime, homedir } from "node:os";
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
@@ -95,6 +95,7 @@ import {
   sendTray,
 } from "./owner-cards.js";
 import { checkDoneEvidence } from "./kanban-evidence.js";
+import { cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
 import { log } from "../logger.js";
 
 const logger = log("web");
@@ -588,11 +589,7 @@ async function handleApi(
     if (!b?.title) return json(res, 400, { error: "title required" });
     if (b.status && !["planned", "in_progress", "waiting", "done"].includes(b.status)) return json(res, 400, { error: "bad status" });
     if (b.priority && !["low", "normal", "high", "urgent"].includes(b.priority)) return json(res, 400, { error: "bad priority" });
-    const id = randomBytes(4).toString("hex");
-    db.prepare(`INSERT INTO kanban_cards (id, title, description, status, assignee, priority, project, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, b.title, b.description ?? null, b.status ?? "planned", b.assignee ?? null,
-        b.priority ?? "normal", b.project ?? null, b.parentId ?? null);
+    const id = createKanbanCard(db, { title: b.title, description: b.description, status: b.status, assignee: b.assignee, priority: b.priority, project: b.project, parentId: b.parentId }, actorOf(req, b));
     return json(res, 200, { id });
   }
 
@@ -771,12 +768,18 @@ async function handleApi(
     // card exactly as it was rather than half-moved.
     const ev = checkDoneEvidence(st, typeof body.verification === "string" ? body.verification : undefined, id);
     if (!ev.ok) return json(res, 400, { error: ev.error });
-    const info = ev.verification
-      ? db.prepare(`UPDATE kanban_cards SET status=?, verification=?, updated_at=unixepoch() WHERE id=?`).run(st, ev.verification, id)
-      : db.prepare(`UPDATE kanban_cards SET status=?, updated_at=unixepoch() WHERE id=?`).run(st, id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    // Optional compare-and-set: `expected_status` makes the move conditional on the card still being in that status.
+    const expected = typeof body.expected_status === "string" ? body.expected_status : null;
+    if (expected !== null && !["planned", "in_progress", "waiting", "done"].includes(expected)) return json(res, 400, { error: "bad expected_status" });
+    const mv = moveCard(db, id, st, { actor: actorOf(req, body), expected, verification: ev.verification ?? null });
+    if (mv.result === "notfound") return json(res, 404, { error: "card not found", id });
+    if (mv.result === "conflict") return json(res, 409, { error: "card is not in the expected status", id, expected_status: expected, current_status: mv.current });
     return json(res, 200, { ok: true, id });
   }
+
+  // --- kanban audit trail : GET /api/kanban/<id>/events -> {status:[...], fields:[...]} ---
+  const ke = path.match(/^\/api\/kanban\/([^/]+)\/events$/);
+  if (ke && m === "GET") return json(res, 200, cardEvents(db, decodeURIComponent(ke[1]!)));
 
   // --- kanban archive : /api/kanban/<id>/archive (reversible: set archived_at) ---
   const ka = path.match(/^\/api\/kanban\/([^/]+)\/archive$/);
@@ -812,8 +815,10 @@ async function handleApi(
     }
     if (sets.length === 0) return json(res, 400, { error: "no updatable fields (priority/project only)" });
     const id = decodeURIComponent(kp[1]!);
-    const info = db.prepare(`UPDATE kanban_cards SET ${sets.join(", ")}, updated_at=unixepoch() WHERE id=?`).run(...vals, id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    const fields: PatchFields = {};
+    if ("priority" in body) fields.priority = body.priority;
+    if ("project" in body) fields.project = body.project;
+    if (patchCard(db, id, fields, actorOf(req, body)).result === "notfound") return json(res, 404, { error: "card not found", id });
     return json(res, 200, { ok: true, id });
   }
 
@@ -1011,6 +1016,13 @@ async function tuneAgent(
       ? tuned.message
       : `saved; not applied live (${tuned.reason}) — takes effect at next restart`,
   });
+}
+
+/** Who is calling: X-Office-Agent (set from OFFICE_AGENT_ID in an agent session) or body.actor. Attribution by convention, not authentication. */
+function actorOf(req: IncomingMessage, body: { actor?: unknown } | null | undefined): string | null {
+  const h = String(req.headers["x-office-agent"] ?? "").trim();
+  const b = body && typeof body.actor === "string" ? body.actor.trim() : "";
+  return (h || b || "").slice(0, 60) || null;
 }
 
 function parseJson(s: string): JsonBody | null {
