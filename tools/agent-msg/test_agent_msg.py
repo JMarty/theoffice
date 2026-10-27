@@ -68,22 +68,48 @@ class Send(Base):
         self.assertEqual(self.send(["marveen", "-"], stdin="multi\nline body")[0], 0)
         self.assertEqual(Bus.seen[0][2]["content"], "multi\nline body")
 
-    def test_http_error_is_retried_three_times_then_fails_loudly(self):
-        Bus.script = [(401, {"error": "unauthorized"})]
-        rc, out, err = self.send(["marveen", "hello"])
-        self.assertEqual(rc, 1)
-        self.assertEqual(len(Bus.seen), 3)
-        self.assertNotIn("sent", out.lower())
-        self.assertIn("NOT SENT", err)
+    def test_a_real_error_answer_is_not_retried_and_fails_loudly(self):
+        for code in (400, 401, 500):
+            Bus.script, Bus.seen = [(code, {"error": "no"})], []
+            rc, out, err = self.send(["marveen", "hello"])
+            self.assertEqual((rc, len(Bus.seen)), (1, 1), code)
+            self.assertIn("NOT SENT", err)
+        self.assertNotIn("sent id", out)
 
-    def test_a_200_without_an_id_is_a_failure(self):
+    def test_502_and_503_are_retried_up_to_three_times(self):
+        Bus.script, Bus.seen = [(503, {"error": "busy"})], []
+        rc, _, err = self.send(["marveen", "hello"])
+        self.assertEqual((rc, len(Bus.seen)), (1, 3))
+        Bus.script, Bus.seen = [(502, {}), (200, {"id": 9})], []
+        self.assertEqual((self.send(["marveen", "hello"])[0], len(Bus.seen)), (0, 2))
+
+    def test_a_read_timeout_is_never_retried_because_the_bus_may_have_accepted_it(self):
+        import socket
+        orig = am.urllib.request.urlopen
+        calls = []
+        def slow(req, timeout=None):
+            if req.full_url.endswith("/api/agents"):
+                return orig(req, timeout=timeout)
+            calls.append(1)
+            raise socket.timeout("timed out")
+        am.urllib.request.urlopen = slow
+        try:
+            rc, out, err = self.send(["marveen", "hello"])
+        finally:
+            am.urllib.request.urlopen = orig
+        self.assertEqual((rc, len(calls)), (2, 1))
+        self.assertIn("UNKNOWN OUTCOME", err)
+        self.assertNotIn("sent id", out)
+        self.assertIn("timeout-unknown-outcome", open(os.path.join(self.tenant, "store", "agent-msg-failures.log")).read())
+
+    def test_a_200_without_an_id_is_a_failure_and_not_repeated(self):
         Bus.script = [(200, {"ok": True})]
         rc, _, err = self.send(["marveen", "hello"])
-        self.assertEqual(rc, 1)
+        self.assertEqual((rc, len(Bus.seen)), (1, 1))
         self.assertIn("NOT SENT", err)
 
     def test_recovers_when_a_later_attempt_succeeds(self):
-        Bus.script = [(500, {"error": "boom"}), (200, {"id": 7})]
+        Bus.script = [(503, {"error": "boom"}), (200, {"id": 7})]
         rc, out, _ = self.send(["marveen", "hello"])
         self.assertEqual((rc, len(Bus.seen)), (0, 2))
         self.assertIn("id=7", out)
@@ -116,12 +142,15 @@ class Send(Base):
         self.assertNotIn("TOP SECRET", log)
         self.assertNotIn("tok123", log)
 
-    def test_unreachable_bus_fails_loudly(self):
+    def test_unreachable_bus_is_retried_three_times_then_fails_loudly(self):
         self.srv.shutdown()
-        self.srv.server_close()  # really closed: connection refused, not a hang
-        rc, _, err = self.send(["--allow-unknown", "marveen", "hi"])
+        self.srv.server_close()  # really closed: connection refused, nothing was sent
+        slept = []
+        out, err = io.StringIO(), io.StringIO()
+        rc = am.main(["--allow-unknown", "marveen", "hi"], env=self.env, stdin=io.StringIO(""), stdout=out, stderr=err, sleep=slept.append)
         self.assertEqual(rc, 1)
-        self.assertIn("NOT SENT", err)
+        self.assertEqual(slept, [1, 2])  # three attempts, two waits
+        self.assertIn("NOT SENT", err.getvalue())
 
 
 class Observer(unittest.TestCase):
@@ -183,6 +212,20 @@ class Observer(unittest.TestCase):
         quiet = []
         self.assertEqual(sc.check(q, "marveen", os.path.join(d, "s2.json"), 10_000, 1800, 3600, lambda t: quiet.append(t) or True)["stalled"], 0)
         self.assertEqual(quiet, [])
+
+
+
+class WatchdogAlertSemantics(unittest.TestCase):
+    def test_the_watchdog_alert_counts_as_sent_only_with_an_integer_id(self):
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location("ow", os.path.join(os.path.dirname(here), "owner-watchdog", "owner_watchdog.py"))
+        ow = importlib.util.module_from_spec(spec)
+        os.environ.setdefault("OFFICE_TENANT_ROOT", tempfile.mkdtemp())
+        spec.loader.exec_module(ow)
+        self.assertTrue(ow._bus_accepted('{"id": 12}'))
+        for bad in ('{"ok": true}', '{"id": "12"}', "<html>", "", None, "[1]"):
+            self.assertFalse(ow._bus_accepted(bad), bad)
 
 
 if __name__ == "__main__":

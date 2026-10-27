@@ -3,6 +3,11 @@
 
   agent-msg [--from AGENT] [--allow-unknown] TO "message"      (message "-" = read it from stdin)
 
+Retries are SAFE ones only: a POST that may already have been accepted is never repeated (the bus has no idempotency key, a repeat would deliver
+the message twice). Retried: connection refused / unreachable (nothing was sent) and HTTP 502/503 (a proxy or the bus was not ready). NOT retried: a read
+timeout (the bus may have accepted it: reported as UNKNOWN OUTCOME, exit 2, check the recipient before resending) and any other HTTP error (400/401/500: a
+real answer, retrying cannot help). A message that starts with `--` is read as an option: pass it after `--` or via stdin (`agent-msg TO -`).
+
 Why: `curl ... >/dev/null && echo sent` reports success whenever curl completed an HTTP request, even if the bus answered
 401/400/500, so a message can be lost while the sender believes it was delivered. Here a message counts as sent ONLY when the bus
 answered HTTP 200 with an integer id. The JSON body is built with json.dumps (quotes, newlines, $ and backticks are safe), a failure
@@ -17,6 +22,7 @@ import json
 import os
 import sys
 import time
+import socket
 import urllib.error
 import urllib.request
 
@@ -68,21 +74,40 @@ def main(argv, env=os.environ, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.st
     body = json.dumps({"from": sender, "to": a.to, "content": content}).encode()
     last = "no-attempt"
     for n in range(1, ATTEMPTS + 1):
+        retry = False
         try:
             req = urllib.request.Request(base + "/api/messages", data=body, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=15) as r:
-                payload = json.load(r)
+                try:
+                    payload = json.load(r)
+                except ValueError:
+                    payload = None
                 if r.status == 200 and isinstance(payload, dict) and isinstance(payload.get("id"), int):
                     print(f"sent id={payload['id']} to={a.to}", file=stdout)
                     return 0
-                last = f"http {r.status} without an id"
+                last = f"http {r.status} without an id"  # the bus answered: do not repeat
         except urllib.error.HTTPError as e:
             last = f"http {e.code}"
-        except (OSError, ValueError) as e:
+            retry = e.code in (502, 503)
+        except (socket.timeout, TimeoutError):
+            print(f"agent-msg: UNKNOWN OUTCOME for {a.to}: the bus did not answer in time and may have accepted the message. NOT retried (that could deliver it twice): check the recipient before resending.", file=stderr)
+            _log_failure(tenant, sender, a.to, "timeout-unknown-outcome")
+            return 2
+        except urllib.error.URLError as e:
+            if isinstance(e.reason, (socket.timeout, TimeoutError)):
+                print(f"agent-msg: UNKNOWN OUTCOME for {a.to}: the bus did not answer in time and may have accepted the message. NOT retried (that could deliver it twice): check the recipient before resending.", file=stderr)
+                _log_failure(tenant, sender, a.to, "timeout-unknown-outcome")
+                return 2
+            last = f"unreachable {type(e.reason).__name__}"
+            retry = True  # connection refused / no route: nothing was sent, safe to repeat
+        except OSError as e:
             last = f"error {type(e).__name__}"
+            retry = isinstance(e, ConnectionError) and not isinstance(e, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError))
+        if not retry:
+            break
         if n < ATTEMPTS:
             sleep(n)
-    print(f"agent-msg: NOT SENT to {a.to} after {ATTEMPTS} attempts ({last})", file=stderr)
+    print(f"agent-msg: NOT SENT to {a.to} ({last})", file=stderr)
     _log_failure(tenant, sender, a.to, last)
     return 1
 

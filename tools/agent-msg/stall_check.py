@@ -32,8 +32,8 @@ def check(db_path, main_agent, state_path, now, stall_sec, cooldown_sec, send):
     alerted = False
     if rows and now - state.get("last_alert", 0) >= cooldown_sec:
         oldest = (now - min(r[2] for r in rows)) // 60
-        text = (f"[inbox-stall] {len(rows)} message(s) to {main_agent} have been pending for {stall_sec // 60}+ min (oldest {oldest} min, ids "
-                f"{', '.join(str(r[0]) for r in rows[:8])}). Nobody is reading the bus: check the {main_agent} session and the engine.")
+        text = (f"[inbox-stall] {len(rows)} message(s) to {main_agent} have not been taken for {stall_sec // 60}+ min (oldest {oldest} min, ids "
+                f"{', '.join(str(r[0]) for r in rows[:8])}). Either {main_agent} is in a long turn or nobody is reading the bus: check the {main_agent} session and the engine.")
         if send(text):
             state["last_alert"] = now
             alerted = True

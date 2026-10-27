@@ -183,6 +183,14 @@ def run_once(dry=False, verbose=False, check_live=True):
     return acted
 
 
+def _bus_accepted(body):
+    """Same rule as agent-msg: the bus accepted a message only if it answered with an integer id (a 200 without one must not burn the alert cooldown)."""
+    try:
+        return isinstance(json.loads(body).get("id"), int)
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def main_inbox_check(dry=False):
     """Second job of this timer: bus messages to the main agent that never reach it (see tools/agent-msg/stall_check.py).
     Alerts the infra agent (not the stalled inbox itself) at most once an hour; the stamp in store/main-inbox-observer.json shows the observer is alive."""
@@ -192,7 +200,7 @@ def main_inbox_check(dry=False):
     alert_to = os.environ.get("MAIN_INBOX_ALERT_TO", "darryl")
     res = stall_check.check(DB, main_agent, f"{TENANT}/store/main-inbox-observer.json", int(time.time()),
                             int(os.environ.get("MAIN_INBOX_STALL_SEC", "1800")), 3600,
-                            (lambda text: print(text) or True) if dry else (lambda text: bool(bus(alert_to, text))))
+                            (lambda text: print(text) or True) if dry else (lambda text: _bus_accepted(bus(alert_to, text))))
     return res
 
 
