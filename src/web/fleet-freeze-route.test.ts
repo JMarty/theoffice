@@ -63,6 +63,14 @@ describe("dashboard freeze / unfreeze routes", () => {
     expect(existsSync(frozenFile())).toBe(false);
   });
 
+  it("a cross-site browser request is refused even with a valid owner JWT; same-origin and non-browser callers pass the check", async () => {
+    await start();
+    expect((await unfreeze({ "Cf-Access-Jwt-Assertion": jwt(), "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await unfreeze({ "Cf-Access-Jwt-Assertion": jwt(), "Sec-Fetch-Site": "same-site" })).status).toBe(403);
+    expect(existsSync(frozenFile())).toBe(true);
+    expect((await unfreeze({ "Cf-Access-Jwt-Assertion": jwt(), "Sec-Fetch-Site": "same-origin" })).status).toBe(200);
+  });
+
   it("a valid BEARER alone is refused with 403 and the fleet stays frozen (agents hold the bearer)", async () => {
     await start();
     const r = await unfreeze({ Authorization: `Bearer ${TOKEN}` });

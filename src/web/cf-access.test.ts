@@ -75,6 +75,12 @@ describe("verifyAccessJwt", () => {
     expect((await verify(jwt({}), { jwks: { keys: [] } })).ok).toBe(false);
   });
 
+  it("an empty-string audience in the config never matches (blank entries are dropped)", async () => {
+    expect((await verify(jwt({ aud: [""] }), { c: { teamDomain: TEAM, audiences: ["", AUD], ownerEmail: OWNER } })).ok).toBe(false);
+    expect((await verify(jwt({}), { c: { teamDomain: TEAM, audiences: ["", AUD], ownerEmail: OWNER } })).ok).toBe(true);
+    expect((await verify(jwt({}), { c: { teamDomain: TEAM, audiences: [""], ownerEmail: OWNER } })).ok).toBe(false);
+  });
+
   it("an incomplete config rejects everything (secure default)", async () => {
     expect((await verify(jwt({}), { c: { teamDomain: "", audiences: [AUD], ownerEmail: OWNER } })).ok).toBe(false);
     expect((await verify(jwt({}), { c: { teamDomain: TEAM, audiences: [], ownerEmail: OWNER } })).ok).toBe(false);

@@ -219,6 +219,12 @@ export function startServer(cfg: EngineConfig): () => void {
     // Dashboard UNFREEZE: the one route that is NOT opened by the bearer token (every agent holds it). Its only credential is a Cloudflare Access JWT
     // for the owner's email, verified against the team keys. A bearer, a request from 127.0.0.1 or a forged header gets a plain 403 and changes nothing.
     if (path === "/api/fleet/unfreeze" && req.method === "POST") {
+      // A browser sends Sec-Fetch-Site on every request: anything not same-origin (another site's page driving the owner's logged-in browser) is refused.
+      const site = req.headers["sec-fetch-site"];
+      if (typeof site === "string" && site !== "same-origin") {
+        logger.warn({ site }, "dashboard unfreeze refused: cross-site request");
+        return json(res, 403, { error: "forbidden: same-origin requests only" });
+      }
       const r = await verifyAccessJwt(
         typeof req.headers["cf-access-jwt-assertion"] === "string" ? (req.headers["cf-access-jwt-assertion"] as string) : undefined,
         cfg.web.cfAccess ?? { teamDomain: "", audiences: [], ownerEmail: "" },
@@ -230,7 +236,7 @@ export function startServer(cfg: EngineConfig): () => void {
         return json(res, 403, { error: "forbidden: unfreeze needs the owner, signed in through Cloudflare Access" });
       }
       const was = unfreezeFleet(cfg);
-      logger.warn({ was }, "fleet thawed from the dashboard by the owner");
+      logger.warn({ was, from: req.headers["cf-connecting-ip"] ?? "no-cf-ip" }, "fleet thawed from the dashboard by the owner");
       if (was && cfg.owner.slackUserId) enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet thawed from the dashboard (${r.email}). Agents can work again.`);
       return json(res, 200, freezeState(cfg));
     }

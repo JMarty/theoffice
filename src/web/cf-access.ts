@@ -30,7 +30,8 @@ export async function verifyAccessJwt(
   nowMs: number,
   getJwks: (refresh: boolean) => Promise<Jwks | null>
 ): Promise<AccessResult> {
-  if (!cfg.teamDomain || !cfg.audiences?.length || !cfg.ownerEmail) return { ok: false, reason: "access not configured" };
+  const audiences = (cfg.audiences ?? []).filter((a) => typeof a === "string" && a.trim() !== ""); // an empty string in the config must never match an empty aud claim
+  if (!cfg.teamDomain || !audiences.length || !cfg.ownerEmail) return { ok: false, reason: "access not configured" };
   if (!token) return { ok: false, reason: "no token" };
   const parts = token.split(".");
   if (parts.length !== 3 || !parts[2]) return { ok: false, reason: "malformed token" };
@@ -55,7 +56,7 @@ export async function verifyAccessJwt(
   const nowSec = Math.floor(nowMs / 1000);
   if (claims.iss !== `https://${cfg.teamDomain}`) return { ok: false, reason: "wrong issuer" };
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!aud.some((a) => typeof a === "string" && cfg.audiences.includes(a))) return { ok: false, reason: "wrong audience" };
+  if (!aud.some((a) => typeof a === "string" && audiences.includes(a))) return { ok: false, reason: "wrong audience" };
   if (typeof claims.exp !== "number" || claims.exp <= nowSec) return { ok: false, reason: "expired" };
   if (typeof claims.nbf === "number" && claims.nbf > nowSec + 60) return { ok: false, reason: "not yet valid" };
   const email = typeof claims.email === "string" ? claims.email.trim().toLowerCase() : "";
