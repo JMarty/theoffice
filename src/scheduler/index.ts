@@ -106,7 +106,7 @@ export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
   if (cfg.taskCompletion?.enabled === false || cfg.taskCompletion?.alarm === false) return 0; // shadow mode: instruction + records, no alarm
   const db = getDb();
   const nowSec = Math.floor(nowMs / 1000);
-  const rows = findUnfinished(db, nowSec, cfg.taskCompletion?.alarmAfterMin ?? 30, SWEEP_MAX);
+  const rows = findUnfinished(db, nowSec, cfg.taskCompletion?.alarmAfterMin ?? 30, SWEEP_MAX, cfg.taskCompletion?.alarmMaxAgeH ?? 12);
   if (!rows.length) return 0;
   sendAgentMessage(cfg.mainAgentId, cfg.mainAgentId, alarmDigest(rows, nowSec)); // one digest, not N messages (bus breakers)
   for (const r of rows) {

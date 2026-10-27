@@ -86,6 +86,13 @@ describe("findUnfinished (the watchdog sweep)", () => {
     expect(ids).not.toContain(hb);
   });
 
+  it("stale-run cap: a run fired more than alarmMaxAgeH ago is never swept, so enabling alarms after a shadow period does not digest the whole backlog", () => {
+    addRun("three-days-old", NOW - 3 * 86400);
+    const recent = addRun("recent", NOW - 3600);
+    expect(findUnfinished(getDb(), NOW, 30, 10).map((r) => r.id)).toEqual([recent]); // default 12 h
+    expect(findUnfinished(getDb(), NOW, 30, 10, 100)).toHaveLength(2); // the cap is a parameter
+  });
+
   it("caps a sweep so a backlog cannot flood the main agent", () => {
     for (let i = 0; i < 12; i++) addRun(`t${i}`, NOW - 3600);
     expect(findUnfinished(getDb(), NOW, 30, 5)).toHaveLength(5);

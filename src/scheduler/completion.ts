@@ -43,16 +43,17 @@ export interface UnfinishedRun {
   delivery: string | null;
 }
 
-/** Runs that expected completion, are still open, were never alarmed, and were FIRED more than `afterMin` ago (fire time, not the occurrence time). Oldest first, capped. */
-export function findUnfinished(db: DB, nowSec: number, afterMin: number, limit: number): UnfinishedRun[] {
+/** Runs that expected completion, are still open, were never alarmed, and were FIRED more than `afterMin` and less than `maxAgeH` hours ago (fire time, not the occurrence time). The upper bound keeps a backlog
+ * (shadow mode, an outage) from being digested when alarms are switched on. Oldest first, capped. */
+export function findUnfinished(db: DB, nowSec: number, afterMin: number, limit: number, maxAgeH = 12): UnfinishedRun[] {
   const rows = db
     .prepare(
       `SELECT t.id, t.name, t.agent, t.ts, t.fired_at, i.status AS delivery
          FROM task_runs t LEFT JOIN inbound_queue i ON i.id = t.inbound_id
-        WHERE t.expects_completion = 1 AND t.completed_at IS NULL AND t.alarmed_at IS NULL AND t.fired_at <= ?
+        WHERE t.expects_completion = 1 AND t.completed_at IS NULL AND t.alarmed_at IS NULL AND t.fired_at <= ? AND t.fired_at >= ?
         ORDER BY t.fired_at ASC LIMIT ?`
     )
-    .all(nowSec - afterMin * 60, limit) as UnfinishedRun[];
+    .all(nowSec - afterMin * 60, nowSec - maxAgeH * 3600, limit) as UnfinishedRun[];
   return rows;
 }
 
