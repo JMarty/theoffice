@@ -217,6 +217,26 @@ Environment=OFFICE_HOST=$BIND_HOST
 WantedBy=default.target
 EOF
 
+# ---- 4b. watchdog + backup unit templates ----------------------------------
+# templates/units/*.service|timer carry @ROOT@ (engine checkout), @TENANT@ and @TZ@; rendered into the user unit dir.
+# OFFICE_WATCHDOGS=core (default: the detect-only reliability set) | all (also backup, offsite push, embed, oomwatch, modal sweeper) | none
+WATCHDOGS="${OFFICE_WATCHDOGS:-core}"
+CORE_TIMERS="service-health owner-watchdog owner-ack-guard drift-detect context-watchdog frozen-pane-alarm"
+if [ "$WATCHDOGS" != "none" ] && [ -d "$INSTALL_DIR/templates/units" ]; then
+  say "Installing watchdog units ($WATCHDOGS)"
+  mkdir -p "$TENANT_ROOT/tools"
+  for f in "$INSTALL_DIR"/templates/units/*.service "$INSTALL_DIR"/templates/units/*.timer; do
+    [ -f "$f" ] || continue
+    sed -e "s#@ROOT@#$INSTALL_DIR#g" -e "s#@TENANT@#$TENANT_ROOT#g" -e "s#@TZ@#$TZ_VALUE#g" "$f" > "$UNIT_DIR/$(basename "$f")"
+  done
+  # act.conf (context-watchdog /compact action) is NOT installed by default: opt in by copying it to context-watchdog.service.d/
+  if [ "$WATCHDOGS" = "all" ]; then
+    WATCH_ENABLE="$(cd "$INSTALL_DIR/templates/units" && ls *.timer | sed 's/\.timer$//')"
+  else
+    WATCH_ENABLE="$CORE_TIMERS"
+  fi
+fi
+
 # ---- 5. enable + start ------------------------------------------------------
 # Linger lets the user's systemd instance (user@<uid>.service) start at boot
 # WITHOUT an interactive login — otherwise the fleet only comes up when someone
@@ -242,6 +262,7 @@ say "Starting services"
 systemctl --user daemon-reload
 systemctl --user enable --now theoffice-tmux.service
 systemctl --user enable --now theoffice.service
+for t in ${WATCH_ENABLE:-}; do systemctl --user enable --now "$t.timer" 2>/dev/null || warn "could not enable $t.timer"; done
 
 # Wait for the engine to write its token rather than racing a fixed sleep on a slow box.
 TOKEN_FILE="$TENANT_ROOT/store/.dashboard-token"

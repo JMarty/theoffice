@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly off-box code sync
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 @TZ@
+Persistent=true
+
+[Install]
+WantedBy=timers.target
