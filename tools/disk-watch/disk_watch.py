@@ -6,7 +6,8 @@ This runs from a systemd timer (no LLM), measures free space the way `df` does (
 and tells the owner's relay agent over the bus when it gets low. It NEVER deletes anything.
 
 Levels: ok, warn (free below 25% of the volume by default), crit (below 12%). DISK_WARN_GB / DISK_CRIT_GB set an absolute
-free-GB threshold instead (each independently). Hysteresis, so it never
+free-GB threshold instead (each independently). Set both together: crit is clamped to warn, so a
+lone DISK_WARN_GB below the percent-based crit makes crit == warn and the warn level is skipped. Hysteresis, so it never
 alerts every run:
   - an alert goes out when the level gets worse (ok -> warn, ok/warn -> crit);
   - while crit it repeats at most every CRIT_REPEAT_S (60 min), while warn once a day (a busy relay pane can lose a single message);
