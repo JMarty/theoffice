@@ -9,21 +9,54 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let TOKEN = localStorage.getItem("office_token") || "";
 
 // ---------------- API ----------------
+// A NetError means "the engine is not answering" (connection refused, a proxy 502/503/504 while it restarts, an HTML error page instead of JSON):
+// the UI shows "reconnecting" and retries; it must never be mistaken for a bad token.
+class NetError extends Error { constructor(m) { super(m || "engine unreachable"); this.name = "NetError"; } }
+async function rawFetch(path, init) {
+  let r;
+  try { r = await fetch(path, init); } catch (e) { throw new NetError(); }
+  if (r.status === 502 || r.status === 503 || r.status === 504) throw new NetError();
+  return r;
+}
+async function readJson(r) {
+  try { return await r.json(); } catch (e) { throw new NetError("not a JSON answer (proxy error page?)"); }
+}
 async function api(path) {
-  const r = await fetch(path, { headers: { authorization: `Bearer ${TOKEN}` } });
+  const r = await rawFetch(path, { headers: { authorization: `Bearer ${TOKEN}` } });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
-  return r.json();
+  return readJson(r);
 }
 async function post(path, body) {
-  const r = await fetch(path, {
+  const r = await rawFetch(path, {
     method: "POST",
     headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify(body || {}),
   });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
-  return r.json();
+  return readJson(r);
+}
+
+// ---------------- reconnecting (engine restart) ----------------
+let RECONNECTING = false, RC_TIMER = null, RC_DELAY = 2000;
+function setReconnecting(on, firstLoad) {
+  RECONNECTING = on;
+  const bar = $("#reconnect-bar"), screen = $("#reconnect-screen");
+  if (on) {
+    if (firstLoad) { screen && screen.classList.remove("hidden"); $("#gate") && $("#gate").classList.add("hidden"); }
+    else bar && bar.classList.remove("hidden");
+    const pill = $("#connpill"); if (pill) { pill.classList.add("bad"); const b = pill.querySelector("b"); if (b) b.textContent = "reconnecting…"; }
+  } else {
+    bar && bar.classList.add("hidden"); screen && screen.classList.add("hidden");
+    const pill = $("#connpill"); if (pill) { pill.classList.remove("bad"); const b = pill.querySelector("b"); if (b) b.textContent = "connected"; }
+    RC_DELAY = 2000;
+  }
+}
+function scheduleRetry(fn) {
+  clearTimeout(RC_TIMER);
+  RC_TIMER = setTimeout(fn, RC_DELAY);
+  RC_DELAY = Math.min(RC_DELAY * 1.5, 10000); // 2s, 3s, 4.5s ... capped at 10s: back quickly after a restart, gentle if it stays down
 }
 
 // ---------------- format helpers ----------------
@@ -160,10 +193,11 @@ function activityCopy(a, st) {
 }
 
 async function refreshData() {
-  const [agents, overview, usage, host, schedules, runtimes, auth, freeze] = await Promise.all([
+  // /api/usage is the slow call (transcript scan, ~10 s cold): it must NOT hold up the first paint, so it is fetched on the side and fills in when it arrives
+  api("/api/usage?window=24h").then((u) => { USAGE = Object.fromEntries((u.usage || []).map((x) => [x.id, x])); if (CONNECTED) { renderStrip(); if (CURRENT_TAB === "agents") showTab("agents"); } }).catch(() => {});
+  const [agents, overview, host, schedules, runtimes, auth, freeze] = await Promise.all([
     api("/api/agents"),
     api("/api/overview").catch(() => ({})),
-    api("/api/usage?window=24h").catch(() => ({ usage: [] })),
     api("/api/host").catch(() => ({})),
     api("/api/schedules").catch(() => ([])),
     api("/api/runtimes").catch(() => null),
@@ -175,7 +209,6 @@ async function refreshData() {
   AGENTLIST = agents;
   AGENTS = Object.fromEntries(agents.map((a) => [a.id, a]));
   OVERVIEW = overview || {};
-  USAGE = Object.fromEntries((usage.usage || []).map((u) => [u.id, u]));
   HOST = host || {};
   // Mission Control is the configured default (web.dashboard = "mc"): "/" redirects here, so the
   // Classic switch would just bounce back — hide it.
@@ -1078,8 +1111,11 @@ async function softRefresh() {
 }
 async function poll() {
   if (!CONNECTED) return; // never hit the API (and never burn rate-limit strikes) while on the gate
-  try { await softRefresh(); }
-  catch (e) {
+  try {
+    await softRefresh();
+    if (RECONNECTING) setReconnecting(false);
+  } catch (e) {
+    if (e instanceof NetError) { setReconnecting(true, false); scheduleRetry(poll); return; } // keep the page, show the bar, retry fast
     if (/unauthorized|rate limited/i.test(e.message)) showGate(e.message);
   }
 }
@@ -1099,11 +1135,13 @@ async function connect() {
     await api("/api/agents");
     await refreshData();
     CONNECTED = true;
+    setReconnecting(false);
     $("#gate").classList.add("hidden");
     $("#app").classList.remove("hidden");
     renderHeader(); renderFreezeBanner(); renderAuthBanner(); renderStrip(); renderTabs();
     await showTab(CURRENT_TAB);
   } catch (e) {
+    if (e instanceof NetError) { setReconnecting(true, true); scheduleRetry(connect); return; } // engine restarting: no token gate, no blank page
     showGate(e.message);
   }
 }

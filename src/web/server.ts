@@ -14,7 +14,7 @@ import { loadScheduledTasks } from "../scheduler/index.js";
 import { sendAgentMessage } from "../bus/index.js";
 import { enqueueOutbound } from "../queue/index.js";
 import { saveMemory, searchMemories, searchMemoriesHybrid } from "../memory/store.js";
-import { computeUsage, WINDOW_MS } from "./usage.js";
+import { computeUsageAsync, WINDOW_MS } from "./usage.js";
 import { checkUpdates, applyUpdate } from "./update.js";
 import { runEmergencyRestart } from "./emergency.js";
 import {
@@ -204,6 +204,8 @@ export function getClientIp(req: IncomingMessage, trustedProxyToken?: string): s
   return req.socket.remoteAddress || "unknown";
 }
 
+const usageCache = new Map<string, { at: number; body: unknown }>();
+const usageInflight = new Map<string, Promise<unknown>>();
 let jwksOverride: ((refresh: boolean) => Promise<Jwks | null>) | null = null;
 export const _setJwksForTest = (f: ((refresh: boolean) => Promise<Jwks | null>) | null): void => { jwksOverride = f; };
 
@@ -417,11 +419,23 @@ async function handleApi(
     let cutoff = 0;
     if (w === "restart") cutoff = BOOT_MS;
     else if (w !== "all") cutoff = Date.now() - (WINDOW_MS[w] ?? WINDOW_MS["24h"]!);
-    const agents = loadAgents(cfg);
-    const usage = computeUsage(agents, cutoff)
-      .map((u) => ({ ...u, displayName: agents.find((a) => a.id === u.id)?.displayName ?? u.id }))
-      .sort((a, b) => b.output - a.output);
-    return json(res, 200, { window: w, since: cutoff, bootMs: BOOT_MS, usage });
+    // Reading every agent's transcripts takes ~10 s and the dashboard asks every 15 s. So: it runs in a worker thread (never blocks the event
+    // loop), is cached for 60 s, a stale copy is served instantly while ONE refresh runs in the background, and concurrent callers share that refresh.
+    const hit = usageCache.get(w);
+    const fresh = hit && _now() - hit.at < 60_000;
+    let pending = usageInflight.get(w);
+    if (!fresh && !pending) {
+      const agents = loadAgents(cfg);
+      pending = computeUsageAsync(agents, cutoff).then((rows) => {
+        const usage = rows.map((u) => ({ ...u, displayName: agents.find((a) => a.id === u.id)?.displayName ?? u.id })).sort((a, b) => b.output - a.output);
+        const body = { window: w, since: cutoff, bootMs: BOOT_MS, usage };
+        usageCache.set(w, { at: _now(), body });
+        return body;
+      }).finally(() => usageInflight.delete(w));
+      usageInflight.set(w, pending);
+    }
+    if (hit) return json(res, 200, hit.body); // fresh, or stale while the refresh above runs
+    return json(res, 200, await pending!);
   }
 
   // GET /api/update/check — list commits this install is behind

@@ -31,6 +31,15 @@
       <div class="err" id="gate-err"></div>
     </div>
 
+    <!-- Shown instead of a blank page while the engine is restarting or unreachable; app.js retries by itself. -->
+    <div id="reconnect-screen" class="hidden" role="status">
+      <div class="brand-lg">The Office</div>
+      <span class="ml">Mission Control</span>
+      <div class="rc-msg">Reconnecting to the engine…</div>
+      <div class="rc-sub" id="rc-sub">It is restarting or unreachable. This page retries by itself.</div>
+    </div>
+    <div id="reconnect-bar" class="hidden" role="status">⟳ Connection to the engine lost, reconnecting…</div>
+
     <!-- App shell (built by app.js) -->
     <div id="app" class="hidden">
       <header><div class="hwrap" id="hwrap"></div></header>

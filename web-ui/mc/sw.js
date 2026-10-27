@@ -1,7 +1,7 @@
 // Mission Control service worker — scope /mc/. Network-first so a new dashboard
 // deploy is always picked up; the app shell is cached only as an offline fallback.
 // API calls live at /api/* (outside this scope) and are never seen/cached here.
-const VERSION = "mc-7";
+const VERSION = "mc-8";
 const CACHE = "mc-" + VERSION;
 const SHELL = ["/mc/", "/mc/index.html", "/mc/app.js", "/mc/style.css",
                "/mc/manifest.webmanifest", "/mc/icon-192.png", "/mc/icon-512.png"];
@@ -33,6 +33,8 @@ self.addEventListener("fetch", (e) => {
   e.respondWith((async () => {
     try {
       const fresh = await fetch(req, { cache: "no-store" });
+      // a 5xx from the proxy means the engine is restarting: serve the cached shell (app.js then shows "reconnecting") instead of an error page
+      if (fresh && fresh.status >= 500) { const cached = await caches.match(req); if (cached) return cached; }
       if (fresh && fresh.ok) {
         const c = await caches.open(CACHE);
         c.put(req, fresh.clone());

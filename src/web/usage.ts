@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { Worker } from "node:worker_threads";
 import type { AgentDef } from "../types.js";
 
 /**
@@ -26,6 +27,25 @@ export interface AgentUsage {
   turns: number;
   /** false when the runtime keeps no Claude transcripts (codex/gemini) so usage is unmeasurable → show "n/a", not 0. */
   tracked: boolean;
+}
+
+/**
+ * computeUsage in a worker thread, so the ~10 s transcript scan never freezes the engine's event loop (Slack ingest, the deliverer and the
+ * dashboard API all share it). Falls back to computing inline if the worker cannot start (e.g. running from source under test).
+ */
+export function computeUsageAsync(agents: AgentDef[], cutoffMs: number): Promise<AgentUsage[]> {
+  return new Promise((resolve) => {
+    let done = false;
+    const inline = () => { if (!done) { done = true; resolve(computeUsage(agents, cutoffMs)); } };
+    try {
+      const w = new Worker(new URL("./usage-worker.js", import.meta.url), { workerData: { agents, cutoff: cutoffMs } });
+      w.once("message", (r: AgentUsage[]) => { done = true; resolve(r); void w.terminate(); });
+      w.once("error", inline);
+      w.once("exit", () => inline());
+    } catch {
+      inline();
+    }
+  });
 }
 
 export function computeUsage(agents: AgentDef[], cutoffMs: number): AgentUsage[] {

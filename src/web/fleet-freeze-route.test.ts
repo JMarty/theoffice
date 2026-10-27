@@ -118,6 +118,15 @@ describe("dashboard freeze / unfreeze routes", () => {
     expect((getDb().prepare(`SELECT COUNT(*) AS n FROM outbound_queue`).get() as { n: number }).n).toBe(0);
   });
 
+  it("/api/usage is answered from a 60 s cache (the dashboard polls it every 15 s and a cold read takes ~10 s)", async () => {
+    await start();
+    const get = async () => (await fetch(`${base}/api/usage?window=24h`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json();
+    const a = await get();
+    await new Promise((r) => setTimeout(r, 30));
+    const b = await get();
+    expect(b.since).toBe(a.since); // same body: not recomputed (a recompute would move the cutoff)
+  });
+
   it("freeze still needs the bearer: any agent may freeze, nobody anonymous", async () => {
     await start();
     rmSync(frozenFile());
