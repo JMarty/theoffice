@@ -35,7 +35,7 @@ WATCH_CONFIG = os.environ.get("SERVICE_HEALTH_CONFIG", f"{TENANT}/config/service
 #    "paused_until": {"unit.service": epoch, ...}}           paused ON PURPOSE until that time: neither unknown nor unhealthy before it
 try: _cfg = json.load(open(WATCH_CONFIG))
 except Exception: _cfg = {}
-WATCHED_FRESHNESS = _cfg.get("freshness", {"context-watchdog.service": 1, "drift-detect.service": 1})
+WATCHED_FRESHNESS = _cfg.get("freshness", {"context-watchdog.service": 1, "drift-detect.service": 1, "disk-watch.service": 1})
 WATCHED_ACTIVE = _cfg.get("active", ["theoffice.service", "watchd.service", "theoffice-tmux.service"])
 IGNORED = set(_cfg.get("ignored", []))
 PAUSED_UNTIL = _cfg.get("paused_until", {})

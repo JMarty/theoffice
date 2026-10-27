@@ -9,7 +9,7 @@ Levels: ok, warn (free below 25% of the volume by default), crit (below 12%). DI
 free-GB threshold instead (each independently). Hysteresis, so it never
 alerts every run:
   - an alert goes out when the level gets worse (ok -> warn, ok/warn -> crit);
-  - while crit it repeats at most every CRIT_REPEAT_S (60 min);
+  - while crit it repeats at most every CRIT_REPEAT_S (60 min), while warn once a day (a busy relay pane can lose a single message);
   - it returns to ok only above warn + 20% of warn, with one "back to normal" message.
 A failed send does not advance the state, so the alert is retried on the next run.
 
@@ -29,6 +29,7 @@ import urllib.request
 
 GB = 1024 ** 3
 CRIT_REPEAT_S = 3600
+WARN_REPEAT_S = 86400
 TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
 PORT = os.environ.get("OFFICE_PORT", "3430")
 ALERT_TO = os.environ.get("DISK_WATCH_ALERT_TO", "marveen")
@@ -54,6 +55,8 @@ def decide(prev, free_gb, now, warn_gb, crit_gb):
         if now - alerted_at >= CRIT_REPEAT_S:
             return {"level": "crit", "alerted_at": now}, "crit"
         return {"level": "crit", "alerted_at": alerted_at}, None
+    if raw == "warn" and prev_level == "warn" and now - alerted_at >= WARN_REPEAT_S:
+        return {"level": "warn", "alerted_at": now}, "warn"
     if prev_level != "ok" and free_gb >= warn_gb * 1.2:
         return {"level": "ok", "alerted_at": now}, "recovered"
     return {"level": prev_level, "alerted_at": alerted_at}, None  # better but inside the margin: keep the worse level, stay quiet
@@ -73,7 +76,7 @@ def message(kind, free_gb, total_gb, warn_gb, crit_gb, path):
         head = "[disk-watch] CRITICAL: %.1f GB free on %s (threshold %.0f GB). If it runs out the whole fleet stops." % (free_gb, path, crit_gb)
     else:
         head = "[disk-watch] Warning: %.0f GB free on %s (threshold %.0f GB)." % (free_gb, path, warn_gb)
-    return head + " Nothing was deleted; find what grew (du -sh on the biggest directories) and decide what to clear."
+    return head + " Relay this to the owner. Nothing was deleted; find what grew (du -sh on the biggest directories) and decide what to clear."
 
 
 def save_state(path, state):
