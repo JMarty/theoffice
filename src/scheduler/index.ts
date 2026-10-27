@@ -14,6 +14,10 @@ const TICK_MS = 30_000; // sub-minute; per-minute dedup makes double-fire imposs
 // Boot catch-up looks back at most this far for occurrences missed while the engine was down — bounds the
 // work and avoids replaying ancient misses after a long outage.
 const CATCHUP_MAX_MS = 6 * 60 * 60 * 1000;
+const DEFER_MAX_MIN_DEFAULT = 180; // a deferred occurrence runs anyway after this long, so a time-sensitive heartbeat is late, never lost
+const deferred = new Map<string, { task: ScheduledTask; tsSec: number; deferredAtMs: number }>();
+export const _deferredCountForTest = (): number => deferred.size;
+export const _clearDeferredForTest = (): void => deferred.clear();
 const SWEEP_MAX = 5; // alarms per tick: a backlog (e.g. after an outage) cannot flood the main agent
 
 export interface ScheduledTask {
@@ -90,13 +94,18 @@ function wrap(task: ScheduledTask, runId?: number): string {
  * Record the run, then enqueue its prompt carrying the run id. The run row comes first because the prompt needs its id;
  * a deduped enqueue (same minute already fired) removes the row again, so a duplicate never leaves an open orphan.
  */
-function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string): number | undefined {
+function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string, bypassGuard = false): number | undefined {
   // Quota guard: only background work (heartbeats, tasks marked quota:"background") can be deferred; tasks that report to the owner always run.
-  const g = guardDecision(cfg, t.type === "heartbeat" || t.quota === "background" ? "background" : "owner-facing", Date.now());
+  // A deferral is a DELAY, not a skip: the occurrence is parked and retried every tick until the pressure drops or maxDeferMin passes (see retryDeferred).
+  const g = bypassGuard ? { run: true, wouldDefer: false, reason: "max-defer" } : guardDecision(cfg, t.type === "heartbeat" || t.quota === "background" ? "background" : "owner-facing", Date.now());
   if (!g.run) {
-    logger.warn({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard: background work deferred");
+    if (!deferred.has(dedupKey)) {
+      deferred.set(dedupKey, { task: t, tsSec, deferredAtMs: Date.now() });
+      logger.warn({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard: background work deferred");
+    }
     return undefined;
   }
+  deferred.delete(dedupKey);
   if (g.wouldDefer) logger.info({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard (shadow): would defer");
   const db = getDb();
   const completion = cfg.taskCompletion?.enabled !== false;
@@ -111,6 +120,17 @@ function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: s
   }
   db.prepare(`UPDATE task_runs SET inbound_id = ? WHERE id = ?`).run(id, runId);
   return id;
+}
+
+/** Retry parked (quota-deferred) occurrences: fire when the guard lets them through, or unconditionally once maxDeferMin has passed. */
+export function retryDeferred(cfg: EngineConfig, nowMs: number): number {
+  const maxMs = (cfg.quotaGuard?.maxDeferMin ?? DEFER_MAX_MIN_DEFAULT) * 60_000;
+  let fired = 0;
+  for (const [key, d] of [...deferred]) {
+    if (fireOne(cfg, d.task, d.tsSec, key, nowMs - d.deferredAtMs >= maxMs) != null) fired++;
+    else if (!deferred.has(key)) deferred.delete(key); // already fired elsewhere (dedup): nothing left to retry
+  }
+  return fired;
 }
 
 /** Alarm the main agent with ONE digest (each run once) about task runs that fired but were never marked complete. */
@@ -200,6 +220,7 @@ export function startScheduler(cfg: EngineConfig): () => void {
   const tick = () => {
     if (stopped) return;
     try {
+      retryDeferred(cfg, Date.now());
       fireDueTasks(cfg, Date.now());
       sweepUnfinished(cfg, Date.now());
       setLastTick(Date.now()); // advance the catch-up watermark each live tick

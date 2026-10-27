@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EngineConfig } from "../types.js";
 import { openDb, closeDb, getDb } from "../db/index.js";
 import { listQueued } from "../queue/index.js";
-import { fireDueTasks, catchUpMissed, sweepUnfinished } from "./index.js";
+import { fireDueTasks, catchUpMissed, sweepUnfinished, retryDeferred, _deferredCountForTest, _clearDeferredForTest } from "./index.js";
 import { lastOccurrenceBefore } from "./cron.js";
 
 let root: string;
@@ -210,6 +210,39 @@ describe("quota guard wiring", () => {
     getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
     expect(fireDueTasks(mkCfg({ enabled: true, mode: "enforce" }), T)).toBe(1);
     expect(firedNames()).toEqual(["report"]);
+    expect(_deferredCountForTest()).toBe(2); // parked, not dropped
+  });
+
+  it("a deferral is a DELAY: the parked heartbeat fires when pressure drops, once, keeping its original occurrence time", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    const c = mkCfg({ enabled: true, mode: "enforce" });
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    _clearDeferredForTest();
+    setSnapshotForTest(hot);
+    fireDueTasks(c, T + 300_000);
+    expect(retryDeferred(c, Date.now())).toBe(0); // still hot: stays parked
+    expect(_deferredCountForTest()).toBe(2);
+    setSnapshotForTest(null);
+    expect(retryDeferred(c, Date.now())).toBe(2);
+    expect(retryDeferred(c, Date.now())).toBe(0); // nothing left, no double fire
+    const occ = Math.floor((T + 300_000) / 1000);
+    const rows = getDb().prepare(`SELECT name, ts FROM task_runs WHERE agent='qagent' AND name IN ('hb','chore')`).all() as { name: string; ts: number }[];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.ts === occ)).toBe(true);
+  });
+
+  it("after maxDeferMin a parked occurrence runs even under pressure (late, never lost)", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    const c = mkCfg({ enabled: true, mode: "enforce", maxDeferMin: 60 });
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    _clearDeferredForTest();
+    setSnapshotForTest(hot);
+    fireDueTasks(c, T + 360_000);
+    expect(retryDeferred(c, Date.now() + 59 * 60_000)).toBe(0);
+    expect(retryDeferred(c, Date.now() + 61 * 60_000)).toBe(2);
+    expect(_deferredCountForTest()).toBe(0);
   });
 
   it("shadow mode fires everything even under pressure", async () => {
