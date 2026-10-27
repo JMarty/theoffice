@@ -1,0 +1,8 @@
+[Unit]
+Description=agent-state trial: sample the pane state of the trial agent(s) for 55 s (read-only, capture-pane only)
+[Service]
+Type=oneshot
+TimeoutStartSec=70
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+Environment=OFFICE_ROOT=@ROOT@
+ExecStart=/usr/bin/node @ROOT@/tools/agent-state/pane_sampler.mjs
