@@ -161,8 +161,14 @@ describe("static file serving", () => {
   // A directory path passes existsSync but is not readable as a file: readFileSync throws EISDIR,
   // and an unauthenticated GET /mc would take the whole engine down with it.
   it("404s a directory path instead of crashing (EISDIR)", async () => {
-    const res = await fetch(`${base}/mc`);
+    const res = await fetch(`${base}/mc/fonts`); // a directory without a trailing slash (/mc itself now redirects to /mc/)
     expect(res.status).toBe(404);
+  });
+
+  it("redirects /mc to /mc/ rather than reading the directory", async () => {
+    const res = await fetch(`${base}/mc`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/mc/");
   });
 
   it("still serves the directory index when the path ends in a slash", async () => {
