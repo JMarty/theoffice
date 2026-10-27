@@ -21,7 +21,7 @@
 //      authorisation (delete/push/payment/deploy) blind. Freezing is the safe failure; a human decides.
 //
 //   3b. Submit a STUCK PENDING PASTE: a multi-line delivery whose Enter was lost leaves `[Pasted text #N]` in
-//      the composer; the pane reads "busy" forever and the bus queues behind it (toby 2026-10-24, 08:27-14:02).
+//      the composer; the pane reads "busy" forever and the bus queues behind it.
 //      Enter on an idle, non-modal pane with a pending paste is exactly what the lost Enter was meant to do.
 //
 //   4. Drop stale scheduler heartbeats so a moot briefing isn't delivered ahead of, or instead of, live

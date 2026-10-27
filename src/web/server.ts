@@ -558,7 +558,7 @@ async function handleApi(
     }
     const r = upsertSection({ section_key: b.section_key, agent: b.agent, content: b.content, as_of: b.as_of, max_age_sec: b.max_age_sec, status: b.status });
     if (!r.ok) {
-      // LOG THE REFUSAL (dwight, 2026-09-22). A refused board write used to leave NO trace anywhere, four ways
+      // LOG THE REFUSAL. A refused board write used to leave NO trace anywhere, four ways
       // over: this handler did not log it, four of six writers catch the exception into a WARN nobody reads, and
       // briefing_board has section_key as PRIMARY KEY so the next post overwrites the row with no history table.
       // That makes both failure directions unmeasurable: a health leak is invisible once overwritten, and a

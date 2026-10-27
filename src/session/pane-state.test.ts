@@ -191,7 +191,7 @@ describe("submit-confirm requires positive proof (2026-08-04 strand regression)"
     expect(decideSubmitFollowup(ghost, payload, 0, 4)).toBe("done");
   });
 
-  it("FAST-TURN RACE (Michael 9498): turn ends before the poll, busy never sampled -> still done, no retry", () => {
+  it("FAST-TURN RACE: turn ends before the poll, busy never sampled -> still done, no retry", () => {
     // The false-NEGATIVE twin of the strand: a short turn submits AND finishes before the ~1s confirm
     // sample, so the busy frame is never observed. Keying on busy ALONE would conclude not-delivered and
     // re-Enter, double-submitting (the identical duplicate Michael received). The composer-cleared branch

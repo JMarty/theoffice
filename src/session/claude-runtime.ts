@@ -184,7 +184,7 @@ export async function deliverPrompt(socket: string, session: string, prompt: str
   // Confirm the submit actually landed; retry Enter within a bounded budget. decideSubmitFollowup only
   // reports "done" on POSITIVE proof (agent went busy, or the composer is provably empty) — never on the
   // mere absence of a visibly-parked payload, which is how a TALL unsubmitted message whose box scrolled
-  // out of view was silently marked delivered and stranded the agent (dwight + marveen, 2026-08-04). An
+  // out of view was silently marked delivered and stranded the agent. An
   // unproven submit is retried while the pane is safe to Enter, else requeued whole via submit-give-up.
   // STYLED capture is required: the emptiness half of the proof must de-faint the dim ghost hint a
   // successful submit leaves (that hint IS the prompt we sent) so a landed message reads empty, not stuck.
@@ -290,10 +290,8 @@ export const claudeRuntime: Runtime = {
   id: "claude",
   label: "Claude (Claude Code)",
   // Selectable --model ids (also the allowlist for dashboard/office-tune model changes), newest first.
-  // Fable 5.1 and Opus 5.5 added 2026-09-23; Sonnet 5.5 added 2026-09-30 upstream; Haiku 5.5 added
-  // 2026-10-24. Every id here re-verified live 2026-10-24 via `claude -p ... --model <id>` (Claude Code
-  // 2.1.310), which rejects unknown ids. Older entries stay: agents pinned to them keep working
-  // (Opus 4.8: `home` and `agent-a` run on it), and previous model names remain usable via --model,
+  // Every id here was verified live via `claude -p ... --model <id>` (which rejects unknown ids). Older entries stay:
+  // agents pinned to them keep working, and previous model names remain usable via --model,
   // which is how we launch.
   models: [
     "claude-fable-5-1",

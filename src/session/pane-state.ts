@@ -125,7 +125,7 @@ export function detectPaneState(pane: string): PaneState {
 // alone will select Upgrade (a charge to the owner's card) any time the pane is captured with the
 // highlight on option 2 — a human arrowed down and walked away, a future Claude Code default change, a
 // mid-render frame, any variant we don't control. The highlight is the load-bearing bit, so it must be
-// verified, never assumed (Michael, bus 9274; Toby's required test).
+// verified, never assumed.
 //
 // The highlight marker is `❯` immediately before the option, verified against the REAL 2026-08-04
 // captures (marveen, dwight, toby all rendered `❯ 1. Stop and wait for limit to reset`), not just the
@@ -173,7 +173,7 @@ export function detectsUnsafeUsageLimitModal(pane: string): boolean {
 }
 
 // A permission / approval prompt. This is the class the sweeper must be STRUCTURALLY INCAPABLE of
-// clearing (Michael 9248/9253): dismissing one APPROVES an action — a delete, a push, a payment, a
+// clearing: dismissing one APPROVES an action — a delete, a push, a payment, a
 // deploy — blind, on the owner's box, with his credentials. So the sweeper only ever DETECTS + ALARMS
 // on these and leaves the pane exactly as it is; a human decides. The strings are Claude Code's own
 // approval-menu wording, which never appears in the usage-limit menu. Agents run
@@ -474,7 +474,7 @@ export type SubmitFollowupAction = "retry-enter" | "done" | "give-up";
  *
  * "done" now requires POSITIVE proof (submitConfirmed), not just the absence of a visibly-parked payload.
  * That closes the false-delivery where a tall unsubmitted message (input box unlocatable) read as
- * delivered and stranded the agent for ~20 min (dwight + marveen, 2026-08-04). An unproven submit is
+ * delivered and stranded the agent for ~20 min. An unproven submit is
  * retried while the pane is safe to Enter, and otherwise requeued WHOLE — never silently marked delivered.
  * payloadHint is retained for signature stability; the decision no longer depends on matching it, because
  * matching a visibly-parked payload is exactly what failed when the box scrolled out of view.
