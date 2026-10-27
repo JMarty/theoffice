@@ -78,8 +78,12 @@ def classify(tool, inp):
     if tool == "Bash":
         cmd = str(inp.get("command", ""))
         m = BASH_SEND.search(cmd)
-        if m and not FILE_WRITE.search(cmd[: m.start()]) and not PATCHER.search(cmd):
-            return {"kind": "bash", "key": _digest({"bash": _norm_text(cmd)}), "label": "bash mail send: " + _norm_text(cmd)[:80]}
+        if m:
+            h = _digest({"bash": _norm_text(cmd)})
+            # The label NEVER carries command text: a curl send has its Authorization header in the command.
+            if not FILE_WRITE.search(cmd[: m.start()]) and not PATCHER.search(cmd):
+                return {"kind": "bash", "key": h, "label": f"bash mail send #{h[:8]}"}
+            return {"kind": "exempted", "key": h, "label": f"bash command with a send shape, exempted as data or a patch #{h[:8]}"}  # logged so the log week sizes this blind spot
     return None
 
 
@@ -126,7 +130,9 @@ def _has(store, key, now):
 def _log(store, rec):
     try:
         os.makedirs(store, exist_ok=True)
-        with open(os.path.join(store, "email-gate.log.jsonl"), "a") as f:
+        p = os.path.join(store, "email-gate.log.jsonl")
+        fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(json.dumps(rec) + "\n")
     except OSError:
         pass
@@ -137,6 +143,9 @@ def decide(tool, inp, store, mode, now):
     if not c:
         return {"action": "allow", "reason": "not an email send", "would_deny": False}
     agent = os.environ.get("OFFICE_AGENT_ID", "")
+    if c["kind"] == "exempted":  # never blocked; recorded only
+        _log(store, {"ts": int(now), "mode": mode, "agent": agent, "tool": tool, "kind": "exempted", "label": c["label"], "token_matched": False, "would_deny": False})
+        return {"action": "allow", "reason": "exempted", "would_deny": False}
     if mode != "enforce":
         matched = _has(store, c["key"], now)
         _log(store, {"ts": int(now), "mode": "log", "agent": agent, "tool": tool, "kind": c["kind"], "label": c["label"], "token_matched": matched, "would_deny": not matched})
@@ -193,7 +202,9 @@ def replay(paths):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_use":
                     c = classify(b.get("name", ""), b.get("input"))
-                    if c:
+                    if c and c["kind"] == "exempted":
+                        by_tool["(exempted bash)"] = by_tool.get("(exempted bash)", 0) + 1
+                    elif c:
                         sends += 1
                         by_tool[b["name"]] = by_tool.get(b["name"], 0) + 1
                         if len(samples) < 20:

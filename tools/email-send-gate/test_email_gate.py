@@ -55,12 +55,38 @@ class Classify(unittest.TestCase):
         for c in yes:
             self.assertIsNotNone(g.classify("Bash", {"command": c}), c)
         for c in no:
-            self.assertIsNone(g.classify("Bash", {"command": c}), c)
+            r = g.classify("Bash", {"command": c})
+            self.assertTrue(r is None or r["kind"] == "exempted", c)  # mentions are ignored; patch/heredoc data with a send shape is only LOGGED as exempted, never a send
 
     def test_label_never_contains_the_body(self):
         c = g.classify(GMAIL_SEND, {"to": ["a@example.com"], "subject": "Subj", "body": "SECRET BODY TEXT"})
         self.assertNotIn("SECRET", c["label"])
         self.assertIn("a@example.com", c["label"])
+
+
+class Secrets(unittest.TestCase):
+    CMD = "curl -s -X POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send -H 'Authorization: Bearer ya29.FAKE-BEARER-TOKEN-123' -d @msg.json"
+
+    def test_a_bearer_token_in_a_bash_send_never_reaches_the_label_the_log_or_the_deny_text(self):
+        d = tempfile.mkdtemp()
+        for mode in ("log", "enforce"):
+            r = g.decide("Bash", {"command": self.CMD}, d, mode, NOW)
+            self.assertNotIn("FAKE-BEARER", json.dumps(r))
+        self.assertNotIn("FAKE-BEARER", json.dumps(g.classify("Bash", {"command": self.CMD})))
+        self.assertNotIn("FAKE-BEARER", open(os.path.join(d, "email-gate.log.jsonl")).read())
+
+    def test_the_log_file_is_created_owner_only(self):
+        d = tempfile.mkdtemp()
+        g.decide(GMAIL_SEND, {"to": ["a@example.com"], "subject": "s", "body": "b"}, d, "log", NOW)
+        self.assertEqual(os.stat(os.path.join(d, "email-gate.log.jsonl")).st_mode & 0o777, 0o600)
+
+    def test_exempted_send_shaped_commands_are_logged_as_exempted_and_never_blocked(self):
+        d = tempfile.mkdtemp()
+        patch = "python3 - <<'EOF'\ns=open('d.py').read().replace('a','b')\nr=urllib.request.Request('https://gmail.googleapis.com/gmail/v1/users/me/messages/send')\nEOF"
+        for mode in ("log", "enforce"):
+            self.assertEqual(g.decide("Bash", {"command": patch}, d, mode, NOW)["action"], "allow")
+        recs = [json.loads(x) for x in open(os.path.join(d, "email-gate.log.jsonl"))]
+        self.assertTrue(all(r["kind"] == "exempted" and not r["would_deny"] for r in recs))
 
 
 class Decide(unittest.TestCase):
