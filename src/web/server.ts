@@ -805,6 +805,19 @@ async function handleApi(
   // holds this token. Thawing is the owner's Cloudflare-Access-verified dashboard button (POST /api/fleet/unfreeze, handled above the bearer gate), his
   // Slack command (src/fleet/freeze.ts), or deleting <store>/fleet-freeze.json on the box.
   if (path === "/api/fleet/freeze" && m === "GET") return json(res, 200, freezeState(cfg));
+  // Dashboard Unfreeze on a host WITHOUT Cloudflare Access (e.g. the LAN address): this thaws nothing. It only asks the owner, on Slack, to confirm;
+  // the thaw happens when the owner himself replies "unfreeze fleet" (verified Slack user id, src/fleet/freeze.ts). At most one request per 5 minutes.
+  if (path === "/api/fleet/unfreeze-request" && m === "POST") {
+    if (!freezeState(cfg).frozen) return json(res, 200, { sent: false, reason: "the fleet is not frozen" });
+    if (!cfg.owner.slackUserId) return json(res, 409, { sent: false, reason: "no owner Slack user configured" });
+    const last = (db.prepare(`SELECT v FROM scheduler_state WHERE k='unfreeze_request_at'`).get() as { v: number } | undefined)?.v ?? 0;
+    const nowMs = _now();
+    if (nowMs - last < 5 * 60_000) return json(res, 200, { sent: false, reason: "already asked a moment ago, check Slack" });
+    db.prepare(`INSERT INTO scheduler_state (k, v) VALUES ('unfreeze_request_at', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(nowMs);
+    enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Someone pressed Unfreeze on the dashboard. The fleet is frozen: ${freezeState(cfg).reason ?? "no reason recorded"}. Confirm: reply "unfreeze fleet" to thaw it, or ignore this to keep it frozen.`);
+    logger.warn("dashboard unfreeze requested: asked the owner to confirm on Slack");
+    return json(res, 200, { sent: true });
+  }
   if (path === "/api/fleet/freeze" && m === "POST") {
     const raw = await readBody(req, res); if (raw === null) return;
     const b = parseJson(raw) ?? {};

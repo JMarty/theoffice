@@ -213,7 +213,7 @@ function renderFreezeBanner() {
         <div style="font-weight:800;font-size:14px">FLEET FROZEN: no Claude agent can run a tool, nothing new is delivered, no scheduled work starts</div>
         <div style="font-size:12px;opacity:.9;margin-top:2px">${esc(FREEZE.reason || "")}${FREEZE.by ? " · by " + esc(FREEZE.by) : ""}${FREEZE.at ? " · since " + esc(fmtFreezeSince(FREEZE.at)) : ""}</div>
       </div>
-      <button onclick="unfreezeFleet(this)" style="background:#fff;color:#111;border:0;border-radius:9px;padding:10px 14px;font-weight:800;font-size:13px;cursor:pointer">▶ Unfreeze (owner)</button>
+      <button onclick="unfreezeFleet(this)" style="background:#fff;color:#111;border:0;border-radius:9px;padding:10px 14px;font-weight:800;font-size:13px;cursor:pointer">▶ Unfreeze (owner confirms)</button>
     </div>`;
 }
 async function refreshFreeze() {
@@ -233,8 +233,11 @@ async function unfreezeFleet(btn) {
   try {
     // credentials: include so the Cloudflare Access cookie goes along; deliberately NO Authorization header (the bearer is not accepted here)
     const r = await fetch("/api/fleet/unfreeze", { method: "POST", credentials: "include" });
-    if (r.status === 403) alert("Only the owner can unfreeze, signed in through Cloudflare Access.\n\nOpen this dashboard at its office.* address and sign in with the owner email, or send 'unfreeze fleet' to an agent on Slack.");
-    else if (!r.ok) alert("Unfreeze failed (" + r.status + ")");
+    if (r.status === 403) {
+      // No owner Cloudflare Access login on this address (e.g. the LAN one): ask the owner to confirm on Slack instead; the fleet thaws only when he replies.
+      const q = await post("/api/fleet/unfreeze-request", {});
+      alert(q.sent ? "Asked the owner on Slack to confirm. The fleet thaws when he replies 'unfreeze fleet'." : "Not sent: " + (q.reason || "unknown reason"));
+    } else if (!r.ok) alert("Unfreeze failed (" + r.status + ")");
   } catch (e) { alert("Unfreeze failed: " + e.message); }
   btn.disabled = false;
   await refreshFreeze();

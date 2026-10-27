@@ -45,7 +45,7 @@ describe("dashboard freeze / unfreeze routes", () => {
       mainAgentId: "main",
       web: { host: "127.0.0.1", port, ...(cfAccess ? { cfAccess: { teamDomain: TEAM, audiences: [AUD], ownerEmail: OWNER } } : {}) },
       paths: { dashboardTokenFile: join(dir, "store", ".dashboard-token"), storeDir: join(dir, "store") },
-      owner: { timezone: "UTC" },
+      owner: { timezone: "UTC", slackUserId: "UOWNER" },
       channel: { provider: "none" },
     } as never);
     await new Promise((r) => setTimeout(r, 100));
@@ -89,6 +89,33 @@ describe("dashboard freeze / unfreeze routes", () => {
     await start(false);
     expect((await unfreeze({ "Cf-Access-Jwt-Assertion": jwt() })).status).toBe(403);
     expect(existsSync(frozenFile())).toBe(true);
+  });
+
+  it("unfreeze-request needs the bearer, thaws NOTHING, and asks the owner once per 5 minutes", async () => {
+    await start();
+    const { getDb } = await import("../db/index.js");
+    // owner Slack id is configured in this test config through the cfg object below
+    const call = (auth = true) => fetch(`${base}/api/fleet/unfreeze-request`, { method: "POST", headers: auth ? { Authorization: `Bearer ${TOKEN}` } : {} });
+    expect((await call(false)).status).toBe(401);
+    const r1 = await (await call()).json();
+    expect(r1).toEqual({ sent: true });
+    expect(existsSync(frozenFile())).toBe(true); // asking is not thawing
+    const rows = getDb().prepare(`SELECT text, channel FROM outbound_queue`).all() as { text: string; channel: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.channel).toBe("UOWNER");
+    expect(rows[0]!.text).toContain("unfreeze fleet");
+    const r2 = await (await call()).json();
+    expect(r2.sent).toBe(false); // rate limited
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM outbound_queue`).get() as { n: number }).n).toBe(1);
+  });
+
+  it("unfreeze-request says so when the fleet is not frozen and sends no DM", async () => {
+    await start();
+    rmSync(frozenFile());
+    const { getDb } = await import("../db/index.js");
+    const r = await (await fetch(`${base}/api/fleet/unfreeze-request`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}` } })).json();
+    expect(r).toMatchObject({ sent: false });
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM outbound_queue`).get() as { n: number }).n).toBe(0);
   });
 
   it("freeze still needs the bearer: any agent may freeze, nobody anonymous", async () => {
