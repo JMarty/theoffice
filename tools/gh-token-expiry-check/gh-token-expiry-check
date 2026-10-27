@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# gh-token-expiry-check -- alarm BEFORE the fine-grained GitHub PAT in the git credential helper lapses.
+#
+# WHY (marveen named the prerequisite, 2026-09-24): card 7d8fcba0 wants four contact-poli clones
+# de-embedded onto ~/.config/mv2-gh/git-credentials. That helper token is fine-grained and EXPIRING
+# (2026-09-29). Wire four clones onto it with no renewal story and they all break on the same day
+# with no obvious cause, and whoever hits it debugs four repos instead of one token. So the de-embed
+# is gated on this check existing first: a security fix must not become a scheduled outage.
+#
+# Never prints the token. Read-only API call. Exit 0 ok, 1 warn, 2 expired/unreadable.
+set -uo pipefail
+CRED="${GH_CRED_FILE:-$HOME/.config/mv2-gh/git-credentials}"
+# WARN_FRACTION and MIN_LIFE_DAYS were DELETED on 2026-09-26, not merely bypassed. Both were computed
+# from a token "life" inferred as (expiry - credential-file mtime), which is not the token's life at all
+# (see the note in the warn block). Leaving them as unread knobs was worse than deleting them: the notify
+# body still interpolated MIN_LIFE_DAYS to state the clear condition, so the alarm told its one reader it
+# would stop when a token with ">14d of life" landed -- while the code actually clears at "> WARN_DAYS
+# days REMAINING". A 10-day token would have cleared it while the message said it would not. marveen, the
+# reader who acts on that sentence daily, caught it (bus 18053). A dormant knob is not inert if any
+# user-facing string still reads it.
+# STATE: repeat index, so a daily alarm is distinguishable from a first ask (cfo, 2026-09-24).
+# Every WARN body was byte-identical, so from day 2 the recipient cannot tell a repeat from a new
+# finding, nor "not yet seen" from "seen and deferred" -- silence and refusal look identical from
+# outside. Holds dates and a count ONLY; never the token.
+STATE="${STATE:-$(dirname "$CRED")/.gh-token-expiry-state}"
+# WARN_DAYS raised 2 -> 7 on 2026-09-26. TWO reasons, the second one measured that morning:
+#  (a) rotation is an OWNER action and can span a weekend; 2 days of notice cannot survive a Friday.
+#  (b) MEASURED at 3.4 days from expiry: `days<=WARN_DAYS` was 3<=2 = FALSE, and the fraction rule was
+#      silent, so the ONLY condition still firing was the mtime-derived `short_life` -- a BUG was the
+#      sole thing keeping this check from silence. Deleting that bug without raising this number would
+#      have produced a check that says nothing until ~36h before the vault push breaks.
+WARN_DAYS="${WARN_DAYS:-7}"
+
+[ -r "$CRED" ] || { echo "gh-token-expiry-check: cannot read $CRED"; exit 2; }
+tok="$(sed -nE 's#.*https://[^:/@]+:([^@/]+)@.*#\1#p' "$CRED" | head -1)"
+[ -n "$tok" ] || { echo "gh-token-expiry-check: no token found in $CRED"; exit 2; }
+
+# CHANGE-DETECTOR ON THE VALUE, NOT THE FILE (toby, 2026-09-27, bus 18655). This file's mtime moved
+# twice in 24h while the token stayed identical -- git's `store` helper rewrites it on every credential
+# approve, so the nightly vault mirror push bumps it. mtime therefore reports "changed" when nothing
+# has. Conversely a rotation that reused the same path would look the same. So: fingerprint the VALUE.
+# sha256(token)[:8] only -- never the token, never a prefix of it. A fingerprint and a prefix are both
+# short hex strings and are NOT interchangeable: grepping a file for the fingerprint of the value it
+# holds can never match, and that zero is guaranteed before you run it (toby nearly read exactly that
+# zero as "rotated").
+tok_sha8="$(printf '%s' "$tok" | sha256sum | cut -c1-8)"
+prev_sha8=""; [ -r "$STATE" ] && prev_sha8="$(sed -n 3p "$STATE" 2>/dev/null || true)"
+if [ -n "$prev_sha8" ] && [ "$prev_sha8" != "$tok_sha8" ]; then
+  echo "gh-token-expiry-check: TOKEN CHANGED -- fingerprint ${prev_sha8} -> ${tok_sha8} (rotation or replacement)"
+elif [ -n "$prev_sha8" ]; then
+  echo "gh-token-expiry-check: token unchanged (fingerprint ${tok_sha8})"
+else
+  echo "gh-token-expiry-check: first fingerprint recorded (${tok_sha8})"
+fi
+# PERSIST UNCONDITIONALLY, right here. My first attempt wrote the fingerprint only inside the NOTIFY
+# branch and on the healthy exit -- so a run with NOTIFY unset (every hand-run, and every WARN day
+# before the notify branch is reached) recorded nothing, and the check reported "first fingerprint"
+# forever. That is the same defect as the comment two lines up: a detector that records only in some
+# states cannot detect a change that happens in the others. Caught by running it twice; one run looked
+# perfect.
+_sn=0; _sf=""
+if [ -r "$STATE" ]; then _sn="$(sed -n 1p "$STATE" 2>/dev/null || echo 0)"; _sf="$(sed -n 2p "$STATE" 2>/dev/null || echo "")"; fi
+case "$_sn" in ''|*[!0-9]*) _sn=0;; esac
+printf '%s\n%s\n%s\n' "$_sn" "$_sf" "$tok_sha8" > "$STATE" 2>/dev/null; chmod 600 "$STATE" 2>/dev/null
+
+hdrs="$(curl -sS -D- -o /dev/null -m 20 -H "Authorization: Bearer $tok" https://api.github.com/user 2>&1)"
+rc=$?; unset tok
+[ $rc -eq 0 ] || { echo "gh-token-expiry-check: API call failed (rc=$rc)"; exit 2; }
+
+code="$(printf '%s' "$hdrs" | sed -n '1s#.*[[:space:]]\([0-9][0-9][0-9]\)[[:space:]].*#\1#p')"
+[ "$code" = "200" ] || { echo "gh-token-expiry-check: token did NOT authenticate (HTTP $code) -- already dead or revoked"; exit 2; }
+
+exp="$(printf '%s' "$hdrs" | grep -i 'github-authentication-token-expiration' | tr -d '\r' | sed 's/^[^:]*: *//')"
+if [ -z "$exp" ]; then
+  # A classic PAT returns NO expiry header. That is a finding, not an all-clear: it means the helper
+  # holds a non-expiring credential, which is the exact shape 7d8fcba0 is trying to get rid of.
+  echo "gh-token-expiry-check: WARN -- helper token has NO expiration header (classic PAT shape)"; exit 1
+fi
+now=$(date -u +%s); then_=$(date -u -d "${exp% UTC}" +%s 2>/dev/null || echo 0)
+[ "$then_" -gt 0 ] || { echo "gh-token-expiry-check: cannot parse expiry '$exp'"; exit 2; }
+days=$(( (then_ - now) / 86400 ))
+
+if   [ "$days" -lt 0 ]; then echo "gh-token-expiry-check: EXPIRED ($exp)"; exit 2
+else
+  # TOKEN LIFE IS NOT MEASURABLE HERE, SO IT IS NO LONGER COMPUTED (2026-09-26).
+  # This block used to infer life as (expiry - credential-file mtime) and derive BOTH a fraction rule and
+  # a "SHORT LIFE" finding from it. mtime is when the FILE was last written, NOT when the token was
+  # minted: the file was rewritten at 05:17 on 2026-09-26, collapsing inferred life onto the remaining
+  # time and reporting "minted with only 3d of life" for a token whose real original life is UNKNOWN.
+  # That wrong REASON reached the owner in the morning briefing within the hour, and it prescribed a
+  # remedy -- "the finding is the LIFE, not the date" -- pointing away from the actual action. It also
+  # silently broke the fraction rule: left/life went to ~1.0, so frac_warn was permanently 0.
+  # An unmeasurable input cannot be fixed by rescaling it, so it is deleted. Notice now comes from the
+  # only thing the API tells us: TIME REMAINING. Noise is handled by the repeat index below, which is
+  # what should have been carrying that job all along.
+  # WARN_FRACTION / MIN_LIFE_DAYS are DELETED, not retained (an unread knob still reachable from a
+  # user-facing string is how the clear condition went stale). If original-life logic is ever wanted,
+  # record the mint date at rotation time -- never re-derive it from a file timestamp.
+  if [ "$days" -le "$WARN_DAYS" ]; then
+  echo "gh-token-expiry-check: WARN -- helper token expires in ${days} day(s) ($exp)."
+  # WORDING CORRECTED (marveen, 2026-09-24): "anything wired to it breaks" overstates it. NOTHING is
+  # wired -- credential.helper is unset at every scope -- so a lapse today changes nothing: the four
+  # clones keep using the embedded PAT, which is live and never expires. The expiry blocks the
+  # DE-EMBED PLAN; it does not cause an outage. Said wrongly, the first reader on a bad morning
+  # concludes four repos are about to die.
+  # CORRECTED 2026-09-24 (second time): the previous text said "nothing reads this file yet
+  # (credential.helper unset at every scope)". BOTH halves were wrong, and I had adopted a peer's
+  # negative claim into user-facing text without checking it. ~/obsidian-vault/.git/config wires
+  # credential.helper = store --file=<this file> for github.com/owner/private-kb-repo. So a
+  # lapse DOES break something. Telling a reader an expiry is harmless is the worst possible error
+  # in an expiry alarm.
+  echo "  ONE known consumer: ~/obsidian-vault (private-kb-repo) authenticates via this file,"
+  echo "  so a lapse breaks its push/pull. It ALSO blocks the 7d8fcba0 de-embed plan."
+  echo "  Mint a replacement into $CRED before that date."
+  # PUSH THE FINDING, DO NOT JUST LOG IT (cfo, 2026-09-24): "the check is armed; the finding is not."
+  # v1's only consumer was this log file, and nobody who can mint a token reads it. Rotation is the
+  # OWNER's (card 7d8fcba0) and this agent has no owner channel, so the last hop -- the only hop the
+  # owner is on -- was missing. One level worse than a check that never runs: this one runs, is
+  # correct, and reaches nobody. So it now wakes the agent who owns owner-notification.
+  # NOTIFY IS OPT-IN (marveen, 2026-09-24). v1 defaulted to notifying, so my own two test runs paged
+  # him 12 minutes apart and turned a DAILY alarm into a sub-hourly one -- which, as he put it, stops
+  # being an alarm inside a day. A tool that sends real messages must be silent unless the scheduled
+  # caller explicitly asks. The systemd unit sets NOTIFY; a hand-run or a test never does.
+  # DRY_RUN exists because testing the notify path with a FAKE recipient still sends: the bus accepts
+  # any `to` string and returns a success id (it dead-letters unroutable ones afterwards). My own test
+  # with NOTIFY=nobody-test created three orphan messages. A tool that sends must have a way to
+  # exercise the send path WITHOUT sending, or every test leaves litter in the store.
+  if [ -n "${DRY_RUN:-}" ]; then
+    echo "  [DRY_RUN] would notify ${NOTIFY:-<unset>}: [${seq:-first}] expires in ${days}d"
+  elif [ -n "${NOTIFY:-}" ] && [ ! -r "${OFFICE_TENANT_ROOT:-}/store/.dashboard-token" ]; then
+    # Silently skipping the notify because a path was unreadable is the unknown-state branch again:
+    # the check appears to succeed while the finding reaches nobody. Say so on stderr and in the log.
+    echo "gh-token-expiry-check: *** NOTIFY REQUESTED BUT IMPOSSIBLE *** — cannot read" >&2
+    echo "  \"${OFFICE_TENANT_ROOT:-<OFFICE_TENANT_ROOT unset>}/store/.dashboard-token\"." >&2
+    echo "  The finding is logged and UNSENT. Set OFFICE_TENANT_ROOT in the caller's environment." >&2
+  elif [ -n "${NOTIFY:-}" ]; then
+    # read/advance the repeat index before composing
+    prev_n=0; prev_first=""
+    if [ -r "$STATE" ]; then prev_n=$(sed -n 1p "$STATE" 2>/dev/null || echo 0); prev_first=$(sed -n 2p "$STATE" 2>/dev/null || echo ""); fi
+    case "$prev_n" in ''|*[!0-9]*) prev_n=0;; esac
+    n=$((prev_n + 1)); today=$(date +%Y-%m-%d)
+    [ -n "$prev_first" ] || prev_first="$today"
+    printf '%s\n%s\n%s\n' "$n" "$prev_first" "$tok_sha8" > "$STATE" 2>/dev/null; chmod 600 "$STATE" 2>/dev/null
+    if [ "$n" -eq 1 ]; then seq="FIRST notice"; else seq="notice ${n}, first sent ${prev_first} — you may have already escalated this"; fi
+    body="[${seq}] GitHub credential-helper PAT expires in ${days} day(s) (${exp}). One known consumer: ~/obsidian-vault (private-kb-repo) authenticates via this file, so a lapse breaks its push/pull; it also blocks the 7d8fcba0 de-embed. Automated daily check, no token value included. Nothing needed if a replacement has been minted. THIS ALARM STOPS BY ITSELF once the helper holds a token with more than ${WARN_DAYS} days REMAINING — that is the only condition that clears it, there is nothing to acknowledge and no other way to silence it."
+    printf '%s' "$body" | python3 -c '
+import json,sys,os,urllib.request
+b=sys.stdin.read()
+tok=open(os.environ["OFFICE_TENANT_ROOT"]+"/store/.dashboard-token").read().strip()
+d=json.dumps({"from":"darryl","to":os.environ.get("NOTIFY","marveen"),"content":b}).encode()
+r=urllib.request.Request("http://127.0.0.1:3430/api/messages",data=d,method="POST",
+  headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json"})
+try: print("  notified %s (bus id %s)" % (os.environ.get("NOTIFY","marveen"), json.load(urllib.request.urlopen(r)).get("id")))
+except Exception as e: print("  NOTIFY FAILED: %s -- the finding is logged but unread" % e)
+' || echo "  NOTIFY FAILED (python) -- the finding is logged but unread"
+  fi
+  exit 1
+  fi
+  # No "% of its life remains" here any more: that percentage was computed from the same
+  # mtime-derived life this check no longer trusts (see above). Reporting days remaining and the
+  # expiry date is everything the API actually tells us -- a percentage of an unknown denominator
+  # reads more precise than the data supports, which is the defect, not the rounding.
+  # Caught by the negative control on 2026-09-26: removing `life`/`left` from the WARN path left this
+  # line referencing them, and `set -u` turned the healthy path into an unbound-variable error that
+  # only appeared when the check had nothing to report. A repair is where the next defect enters.
+  # Persist the fingerprint on the HEALTHY path too. Without this the detector only ever learns a
+  # value while WARNing, so a rotation during a quiet period would be invisible -- the state would
+  # still hold the pre-warning token. A change-detector that only records during alarms cannot detect
+  # the change that ends the alarm.
+  # (fingerprint already persisted unconditionally above)
+  echo "gh-token-expiry-check: ok -- ${days} days left ($exp)"
+  exit 0
+fi

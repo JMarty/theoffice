@@ -100,7 +100,7 @@ def main():
         repos.append(rec)
     st = {"checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "repos": repos, "problems": problems}
     json.dump(st, open(STATUS, "w"), ensure_ascii=False, indent=1)
-    import hashlib; sig = hashlib.sha1(json.dumps(sorted(f"{p['repo']}|{p['problem']}" for p in problems)).encode()).hexdigest(); sf = f"{HERE}/.offsite-alert-sig"
+    import hashlib; sig = hashlib.sha1(json.dumps(sorted(f"{p['repo']}|{p['problem']}" for p in problems)).encode()).hexdigest(); sf = f"{TEN}/store/.offsite-alert-sig"
     last = open(sf).read().strip() if os.path.exists(sf) else ""
     open(sf, "w").write(sig if problems else "")                 # a cleared set resets the memory, so the same problem coming back alerts again
     if problems and sig != last:        # the SAME problem set is not re-announced (the status file still says it every run)
