@@ -36,6 +36,7 @@ import {
   detectsPermissionPrompt,
   detectsStuckPendingPaste,
 } from "./pane-state.js";
+import { isFrozen } from "../fleet/freeze.js";
 import {
   reapStaleScheduler,
   enqueueOutbound,
@@ -155,7 +156,7 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
 
   const tick = () => {
     if (stopped) return;
-    try { watchOwnerDelivery(); } catch (err) { logger.error({ err }, "owner-delivery watchdog tick failed"); }
+    try { if (!isFrozen(cfg)) watchOwnerDelivery(); } catch (err) { logger.error({ err }, "owner-delivery watchdog tick failed"); }
     try { sweepModals(); } catch (err) { logger.error({ err }, "modal sweep failed"); }
     try {
       const dropped = reapStaleScheduler(staleSchedulerSec());

@@ -53,5 +53,37 @@ class Install(unittest.TestCase):
         self.assertEqual(ih.apply(once, "/e", "/t", remove=True), cur)
 
 
+
+class DetectorsStayQuietWhileFrozen(unittest.TestCase):
+    """The delivery detectors must not alarm about the silence a freeze causes on purpose."""
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.t, "store"))
+        open(os.path.join(self.t, "store", "fleet-freeze.json"), "w").write("{}")
+        self.tools = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _import(self, rel, name):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(name, os.path.join(self.tools, rel))
+        mod = importlib.util.module_from_spec(spec)
+        os.environ["OFFICE_TENANT_ROOT"] = self.t
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_owner_watchdog_does_nothing_and_never_opens_the_db(self):
+        m = self._import("owner-watchdog/owner_watchdog.py", "ow")
+        self.assertEqual(m.run_once(), {"alert": [], "redrive": []})  # no DB exists in the temp tenant: reaching it would raise
+
+    def test_owner_ack_guard_does_nothing_and_never_opens_the_db(self):
+        m = self._import("owner-ack-guard/owner_ack_guard.py", "oag")
+        self.assertEqual(m.run_once(), [])
+
+    def test_frozen_pane_alarm_exits_0_silently_before_touching_anything(self):
+        r = subprocess.run(["bash", os.path.join(self.tools, "frozen-pane-alarm", "frozen-pane-alarm.sh")], env={"OFFICE_TENANT_ROOT": self.t, "PATH": os.environ["PATH"]}, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertFalse(os.path.exists(os.path.join(self.t, "store", "frozen-pane-alarm.log")))
+
+
 if __name__ == "__main__":
     unittest.main()

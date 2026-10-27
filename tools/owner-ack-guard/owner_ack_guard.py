@@ -169,6 +169,8 @@ def find_gap_rows(conn, agents):
 
 
 def run_once(dry=False, verbose=False, check_live=True):
+    if os.path.exists(f"{TENANT}/store/fleet-freeze.json"):
+        return []  # fleet freeze: delivery is halted on purpose, an unanswered owner message is expected, do not nudge frozen agents
     conn = db()
     rows = find_gap_rows(conn, AGENTS)
     now = int(time.time())

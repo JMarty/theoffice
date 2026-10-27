@@ -24,6 +24,7 @@ set -uo pipefail
 
 SOCKET=theoffice
 ROOT="${OFFICE_TENANT_ROOT:-$(cd "$(dirname "$0")/../../tenant" && pwd)}"
+[ -e "$ROOT/store/fleet-freeze.json" ] && exit 0   # fleet freeze: delivery is halted on purpose, a queued owner message is expected
 DB="$ROOT/store/theoffice.db"
 TOKEN_FILE="$ROOT/store/.dashboard-token"
 STATE="$ROOT/store/frozen-pane-alarm.state"

@@ -120,6 +120,8 @@ def preview(text, n=90):
 
 
 def run_once(dry=False, verbose=False, check_live=True):
+    if os.path.exists(f"{TENANT}/store/fleet-freeze.json"):
+        return {"alert": [], "redrive": []}  # fleet freeze: delivery is halted on purpose, silence is expected, do not alert or re-drive
     conn = db()
     rows = find_gap_rows(conn)
     now = int(time.time())
