@@ -28,7 +28,7 @@ If the config is missing or the key is not in it → default level 3 (old behavi
    # fetch the done cards, then filter client-side for updated_at < (now - 7 days):
    curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:3430/api/kanban?status=done"
    # archive each such id:
-   curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "X-Office-Agent: $OFFICE_AGENT_ID" "http://127.0.0.1:3430/api/kanban/<ID>/archive"
+   curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:3430/api/kanban/<ID>/archive"
    # 404 = no such id (a real success signal); {"ok":true,"id":...} = archived
    ```
 

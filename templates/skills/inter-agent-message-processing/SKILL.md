@@ -33,7 +33,6 @@ description: Read and correctly close inter-agent messages addressed to you. Use
    not the rule itself.
    POLL TO READ, NEVER TO CLOSE.
 3. For each: read content, take the right action (reply on Telegram, delegate, update kanban, or just note).
-   SENDING a message to another agent: `$OFFICE_ROOT/tools/agent-msg/agent-msg <agent-id> "<message>"` (`-` reads stdin). A send counts only if the bus answered HTTP 200 with an id: the tool checks that, retries 3 times and prints NOT SENT on failure. Never infer success from `curl ... >/dev/null && echo sent` (curl exits 0 on a 401/500).
 4. Close it via the **`POST /api/messages/done`** endpoint with `{id,result}` (NOT the old `PUT /api/messages/<ID>` — that path is DEAD on the Office runtime, see Buktatók):
    ```bash
    curl -s -X POST http://127.0.0.1:3430/api/messages/done \
