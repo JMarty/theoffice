@@ -1,0 +1,9 @@
+[Unit]
+Description=office-say drift detector (DETECT-ONLY): alerts the infra agent when an agent gets an owner Slack message but never office-says a reply.
+
+[Service]
+Environment=TZ=@TZ@
+Type=oneshot
+ExecStart=/usr/bin/python3 @ROOT@/tools/drift-detector/drift_detect.py
+StandardOutput=append:@TENANT@/store/drift-detect.log
+StandardError=append:@TENANT@/store/drift-detect.log

@@ -14,6 +14,7 @@ import {
   submitConfirmed,
   safeToResubmit,
   liveInputBox,
+  detectsStuckPendingPaste,
 } from "./pane-state.js";
 
 const SEP = "─".repeat(40);
@@ -127,10 +128,10 @@ describe("shouldRetrySubmit / decideSubmitFollowup", () => {
 });
 
 /**
- * 2026-08-04: dwight + marveen went silent ~20 min. The delivery worker typed each owner message in but
+ * Two agents went silent for minutes. The delivery worker typed each owner message in but
  * the submit Enter was dropped; the message sat parked, yet the confirm loop marked it DELIVERED. Root
  * cause: "done" was returned whenever the payload was not VISIBLY parked — and a TALL parked payload
- * (dwight's message carried a `[Pasted text]` block of 8 photos) pushes the input box's top separator off
+ * pushes the input box's top separator off
  * the captured pane, so liveInputBoxRange returns null and the old shouldRetrySubmit read false = "done".
  * The mirror of the pre-send inversion. The fix makes "done" require POSITIVE proof of submission.
  */
@@ -190,10 +191,10 @@ describe("submit-confirm requires positive proof (2026-08-04 strand regression)"
     expect(decideSubmitFollowup(ghost, payload, 0, 4)).toBe("done");
   });
 
-  it("FAST-TURN RACE (Michael 9498): turn ends before the poll, busy never sampled -> still done, no retry", () => {
+  it("FAST-TURN RACE: turn ends before the poll, busy never sampled -> still done, no retry", () => {
     // The false-NEGATIVE twin of the strand: a short turn submits AND finishes before the ~1s confirm
     // sample, so the busy frame is never observed. Keying on busy ALONE would conclude not-delivered and
-    // re-Enter, double-submitting (the identical duplicate Michael received). The composer-cleared branch
+    // re-Enter, double-submitting (an identical duplicate message). The composer-cleared branch
     // is the load-bearing proof here: payload gone from the box == submitted, even with no busy seen.
     expect(submitConfirmed(ghost)).toBe(true); // busy absent, composer cleared to a dim ghost hint
     expect(submitConfirmed(clean)).toBe(true); // busy absent, composer plainly empty
@@ -322,7 +323,7 @@ describe("inputBoxProvablyEmptyStyled — a DIM ghost hint is chrome, real text 
     // it did before dd5a073. Faint state therefore has to be threaded down the box.
     const wrapped = boxed(
       "\x1b[39m❯\xa0\x1b[2mapprove the pending travel bookings for the team offsite and then",
-      "confirm the seat selection with Dajana\x1b[0m"
+      "confirm the seat selection with Jane\x1b[0m"
     );
     expect(inputBoxProvablyEmptyStyled(wrapped)).toBe(true);
   });
@@ -401,7 +402,7 @@ describe("stripPaneStyling — the plain view must survive the -e capture", () =
 });
 
 describe("detectsUsageLimitModal — dismissable ONLY when Stop-and-wait is highlighted", () => {
-  // Real 2026-08-04 shape (marveen/dwight/toby): cursor `❯` on option 1.
+  // Real shape: cursor `❯` on option 1.
   const HIGHLIGHT_ON_STOP = pane(
     "  ✻ Cooked for 1m 19s",
     "  You've hit your session limit · resets 6:20am",
@@ -410,7 +411,7 @@ describe("detectsUsageLimitModal — dismissable ONLY when Stop-and-wait is high
     "     2. Upgrade your plan",
     "   Enter to confirm · Esc to cancel",
   );
-  // THE DANGEROUS ONE (Toby's required test, Michael 9274): cursor `❯` on Upgrade. Enter here would
+  // THE DANGEROUS ONE: cursor `❯` on Upgrade. Enter here would
   // spend the owner's money — the detector MUST refuse so the sweeper never presses it.
   const HIGHLIGHT_ON_UPGRADE = pane(
     "   What do you want to do?",
@@ -485,7 +486,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   );
   const PERM_BASH = pane(
     "  Do you want to run this command?",
-    "     rm -rf /opt/claude/theoffice/tenant/store",
+    "     rm -rf <tenant>/store",
     "   ❯ 1. Yes",
     "     2. No, and tell Claude what to do differently (esc)",
   );
@@ -508,7 +509,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   // The STARTUP bypass-permissions disclaimer — a fresh install (or an un-seeded new key) wedges here.
   // It carries no idle footer (state=unknown) and uses DIFFERENT wording from a mid-session approval, so
   // without explicit detection a wedged agent reads as plain "unknown" (silent): the deliverer never fires
-  // and the owner DM sits in inbound_queue at attempts 0. This is the Legoza-install failure mode.
+  // and the owner DM sits in inbound_queue at attempts 0. This is the foreign-install failure mode.
   const BYPASS_DISCLAIMER = pane(
     "  WARNING: Claude Code running in Bypass Permissions mode",
     "  Claude Code will not ask before running potentially dangerous commands.",
@@ -534,7 +535,7 @@ describe("detectsPermissionPrompt — DETECT (to alarm), the sweeper must NEVER 
   // install / un-seeded hasTrustDialogAccepted wedges here too, and it also carries no idle footer.
   const FOLDER_TRUST = pane(
     "  Do you trust the files in this folder?",
-    "  /opt/claude/theoffice/tenant/agents/newbie",
+    "  <tenant>/agents/newbie",
     "   ❯ 1. Yes, proceed",
     "     2. No, exit",
   );
@@ -560,4 +561,26 @@ describe("usage-limit sweeper acts on NOTHING but the positive limit-modal signa
       expect(detectsPermissionPrompt(p)).toBe(false);
     });
   }
+});
+
+describe("detectsStuckPendingPaste (the 2026-10-24 jam: a multi-line delivery whose Enter was lost)", () => {
+  it("idle footer + a pasted-text placeholder in the live input box -> stuck", () => {
+    expect(detectsStuckPendingPaste(pane("some earlier output", SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe(true);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ SWAP-GROWTH TRIPWIRE ... [Pasted text #2 +900 chars]", SEP, FOOTER_SHELLS))).toBe(true);
+  });
+  it("the same pane reads busy to the deliverer (that is why nothing delivers behind it)", () => {
+    expect(detectPaneState(pane(SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe("busy");
+  });
+  it("a working agent is never stuck (a busy signal wins), nor is a clean or typing box", () => {
+    expect(detectsStuckPendingPaste(pane("✻ Thinking… (12s · ↓ 1.2k tokens)", SEP, "❯ [Pasted text #1 +4 lines]", SEP, FOOTER))).toBe(false);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ ", SEP, FOOTER))).toBe(false);
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ half a sentence", SEP, FOOTER))).toBe(false);
+  });
+  it("a placeholder only QUOTED in the scrollback (a tool result) is not stuck", () => {
+    expect(detectsStuckPendingPaste(pane("the tool printed: [Pasted text #1 +4 lines]", SEP, "❯ ", SEP, FOOTER))).toBe(false);
+  });
+  it("no idle footer (a modal, a menu) -> never stuck: no Enter may go near a modal", () => {
+    expect(detectsStuckPendingPaste(pane(SEP, "❯ [Pasted text #1 +4 lines]", SEP, "  Enter to confirm · Esc to cancel"))).toBe(false);
+    expect(detectsStuckPendingPaste("")).toBe(false);
+  });
 });

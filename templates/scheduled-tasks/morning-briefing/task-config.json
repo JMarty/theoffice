@@ -1,0 +1,8 @@
+{
+  "schedule": "30 8 * * *",
+  "enabled": false,
+  "type": "heartbeat",
+  "skipIfBusy": false,
+  "forceSend": false,
+  "_seeded": "shipped disabled by the office export; enable it once the agent it names exists"
+}

@@ -6,7 +6,7 @@
 // The fix that mattered was not "remember to be careful" but making the correct check the path of
 // least resistance: the update path runs it itself.
 //
-// THE CUT IS "IS THERE ANYTHING TO LOSE", NOT "COULD I DETERMINE SAFETY" (Michael, 2026-08-01).
+// THE CUT IS "IS THERE ANYTHING TO LOSE", NOT "COULD I DETERMINE SAFETY".
 // The first version keyed on the latter and so treated "cannot determine" as fine — which is the
 // same mistake that, within the hour, let a blind clear-verify report 12 false "clean"s while
 // residue survived. Cannot-tell is not a synonym for safe. It only means safe when there is

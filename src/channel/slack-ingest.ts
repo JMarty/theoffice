@@ -51,16 +51,16 @@ function parseFiles(raw: unknown): SlackFile[] {
 
 const OCR_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The only signal types the deri6 ingest exception recognizes. A validated enum — never free text. */
-export type Deri6SignalType = "ocr" | "bill" | "archive";
+/** The only signal types the portal-signal ingest exception recognizes. A validated enum — never free text. */
+export type PortalSignalType = "ocr" | "bill" | "archive";
 
-/** A bizonylat sorszám: exactly YYYY/NNN (digits + one slash). Strict so the value interpolated into
+/** A document serial: exactly YYYY/NNN (digits + one slash). Strict so the value interpolated into
  *  the archive prompt/fetch-path can never carry anything but digits and a slash — no injection surface. */
 const SORSZAM_RE = /^\d{4}\/\d{3}$/;
 
 /**
- * Scoped deri6 signal parser (tenant portal). This is the ONE narrow exception to the bot-drop:
- * it accepts ONLY a bot-posted message in the dedicated deri6 channel whose JSON payload carries the
+ * Scoped portal signal parser (document portal). This is the ONE narrow exception to the bot-drop:
+ * it accepts ONLY a bot-posted message in the dedicated portal channel whose JSON payload carries the
  * correct shared secret, and returns a strictly-validated submission_id + a strictly-validated `type`.
  * It NEVER returns bot-controlled free text (only a UUID + an enum) and NEVER throws on hostile input.
  * The global bot-drop in parseInbound is unchanged; this runs before it. Pure + testable.
@@ -71,14 +71,14 @@ const SORSZAM_RE = /^\d{4}\/\d{3}$/;
  * the handler emits; it can never inject text. So the (channel + secret + UUID) anti-injection gate is
  * exactly as narrow as before — just typed.
  */
-export function parseDeri6Signal(
+export function parsePortalSignal(
   event: unknown,
   sig?: { channelId: string; secret: string }
-): { submissionId: string; channel: string; type: Deri6SignalType; sorszam: string | null } | null {
+): { submissionId: string; channel: string; type: PortalSignalType; sorszam: string | null } | null {
   if (!sig) return null; // feature disabled (cfg.ocrSignal unset)
   const e = event as Record<string, unknown> | null;
   if (!e || e.type !== "message") return null;
-  if (e.channel !== sig.channelId) return null; // ONLY the dedicated deri6 channel
+  if (e.channel !== sig.channelId) return null; // ONLY the dedicated portal channel
   if (!e.bot_id) return null; // the trigger IS a bot (webhook) post
   let p: unknown;
   try {
@@ -94,7 +94,7 @@ export function parseDeri6Signal(
   if (!OCR_UUID_RE.test(id)) return null; // strict UUID; nothing else is trusted
   // Strict enum: absent => "ocr" (back-compat); explicit "ocr"/"bill"/"archive" only; anything else is
   // rejected (do NOT default-accept a malformed/unknown type — a bad signal is dropped, not coerced).
-  let type: Deri6SignalType;
+  let type: PortalSignalType;
   if (payload.type === undefined || payload.type === "ocr") type = "ocr";
   else if (payload.type === "bill") type = "bill";
   else if (payload.type === "archive") type = "archive";
@@ -276,7 +276,7 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
     const web = agent.slack!.botToken ? new WebClient(agent.slack!.botToken) : null;
 
     // Shared handler for both entry paths: DMs arrive as `message`, channel @-mentions as `app_mention`.
-    // parseDeri6Signal no-ops for app_mention (message-only), and the `slack:<ts>` dedup key means that if
+    // parsePortalSignal no-ops for app_mention (message-only), and the `slack:<ts>` dedup key means that if
     // a single mention ever surfaced as both events, only the first enqueues.
     const handle = async (args: { ack?: () => Promise<void>; event?: unknown; body?: { event?: unknown } }) => {
       if (args.ack) {
@@ -287,19 +287,20 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
         }
       }
       const event = args.event ?? args.body?.event;
-      // Scoped deri6 trigger: the ONLY bot message allowed through, and ONLY as a data-only wake.
+      // Scoped portal trigger: the ONLY bot message allowed through, and ONLY as a data-only wake.
       // Runs BEFORE the human path; a FIXED template + validated UUID is delivered (never bot text).
       // `type` (validated enum) selects one of two fixed templates — nothing else changes.
-      const sig = parseDeri6Signal(event, cfg.ocrSignal);
+      const sig = parsePortalSignal(event, cfg.ocrSignal);
       if (sig && cfg.ocrSignal) {
+        const label = cfg.ocrSignal.label ?? "portal";
         if (sig.type === "archive") {
           enqueueInbound({
             agentId: cfg.ocrSignal.agentId,
             source: "channel",
             prompt:
-              `POST-GENERATE: deri6 bizonylat ${sig.sorszam} (submission ${sig.submissionId}) was approved on ` +
-              `the web + generated — fetch it from https://deri6.hu/svc/bizonylat/view/${sig.sorszam!.replace("/", "-")} ` +
-              `with your gen token, then save it to Drive (05 Bizonylatok) and create the Gmail draft to the ` +
+              `POST-GENERATE: ${label} document ${sig.sorszam} (submission ${sig.submissionId}) was approved on ` +
+              `the web + generated — fetch it from ${cfg.ocrSignal.viewUrlBase ?? ""}${sig.sorszam!.replace("/", "-")} ` +
+              `with your gen token, then file it and create the draft to the ` +
               `tenant. Dedup on submission ${sig.submissionId} — never double-file/draft on a retry.`,
             replyChannel: sig.channel,
             replyUser: "archive-signal", // synthetic — no human reply routing
@@ -310,8 +311,8 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
             agentId: cfg.ocrSignal.agentId,
             source: "channel",
             prompt:
-              `BILL-SIGNAL: new deri6 reading in for submission ${sig.submissionId} — post Szoszo a Slack ` +
-              `heads-up to review + approve the bizonylat at https://deri6.hu/bizonylat. Approval is on the ` +
+              `BILL-SIGNAL: new ${label} reading in for submission ${sig.submissionId} — post ${cfg.ocrSignal.ownerName ?? "the owner"} a Slack ` +
+              `heads-up to review + approve the document at ${cfg.ocrSignal.approveUrl ?? "the portal"}. Approval is on the ` +
               `WEB now; do NOT compute, present, or issue anything.`,
             replyChannel: sig.channel,
             replyUser: "bill-signal", // synthetic — no human reply routing
@@ -321,13 +322,13 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
           enqueueInbound({
             agentId: cfg.ocrSignal.agentId,
             source: "channel",
-            prompt: `OCR-SIGNAL: run the deri6 OCR cross-check for submission ${sig.submissionId}`,
+            prompt: `OCR-SIGNAL: run the ${label} OCR cross-check for submission ${sig.submissionId}`,
             replyChannel: sig.channel,
             replyUser: "ocr-signal", // synthetic — no human reply routing
             dedupKey: `ocr:${sig.submissionId}`, // idempotent: a re-post never double-processes
           });
         }
-        logger.info({ submissionId: sig.submissionId, type: sig.type }, "deri6 signal accepted");
+        logger.info({ submissionId: sig.submissionId, type: sig.type }, "portal signal accepted");
         return; // do NOT fall through to parseInbound / the human path
       }
       const parsed = parseInbound(event, agent.slack!.botUserId);

@@ -9,21 +9,21 @@ describe("computeUsage tracked flag", () => {
 
   it("marks gemini and codex agents untracked, claude/default tracked", () => {
     const agents: any[] = [
-      { id: "zeus", dir: "/nonexistent/zeus", runtime: "claude" },
-      { id: "argus", dir: "/nonexistent/argus", runtime: "gemini" },
+      { id: "alpha", dir: "/nonexistent/alpha", runtime: "claude" },
+      { id: "beta", dir: "/nonexistent/beta", runtime: "gemini" },
       { id: "bob", dir: "/nonexistent/bob", runtime: "codex" },
       { id: "def", dir: "/nonexistent/def" }, // no runtime → defaults to claude
     ];
     const byId = Object.fromEntries(computeUsage(agents, cutoff).map((u) => [u.id, u]));
 
-    expect(byId.zeus.tracked).toBe(true);
+    expect(byId.alpha.tracked).toBe(true);
     expect(byId.def.tracked).toBe(true);
-    expect(byId.argus.tracked).toBe(false);
+    expect(byId.beta.tracked).toBe(false);
     expect(byId.bob.tracked).toBe(false);
   });
 
   it("untracked agents report zeroed counters (no transcript reads)", () => {
-    const [u] = computeUsage([{ id: "argus", dir: "/nonexistent/argus", runtime: "gemini" }] as any[], cutoff);
+    const [u] = computeUsage([{ id: "beta", dir: "/nonexistent/beta", runtime: "gemini" }] as any[], cutoff);
     expect(u).toMatchObject({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0, tracked: false });
   });
 });

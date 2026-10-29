@@ -1,110 +1,43 @@
-# Fix: a fleet nem indul el automatikusan bootkor (linger)
+# Troubleshooting: the fleet does not start at boot (linger)
 
-**Státusz:** nyitott — javítani kell a telepítőben.
-**Érintett fájl:** `scripts/install.sh` (5. lépés: "enable + start").
-**Dátum:** 2026-06-10
+**Status:** fixed in `scripts/install.sh` (step 5, "enable + start"). This page explains the symptom and the manual fix.
 
----
+## Symptom
 
-## Tünet
+After the machine boots, The Office does not start by itself. The services only come up once the
+engine user logs in interactively (console or SSH). On a headless boot, the dashboard, Slack ingest,
+scheduler and bus are not running.
 
-A gép bekapcsolása után a The Office **nem indul el magától**. A service-ek csak
-akkor jönnek fel, amikor a `marty` user **interaktívan belép** (login/SSH).
-Headless boot, reboot vagy "csak bekapcsolom és nem lépek be" esetén a dashboard,
-a Slack ingest, a scheduler és a bus nem futnak.
+Typical sign: `systemctl --user status theoffice.service` shows an **Active since** time close to the
+*login*, not to the *boot*.
 
-Tipikus jel: a `systemctl --user status theoffice.service` **Active since** ideje
-a *bejelentkezés* idejéhez közeli, nem a *boot* idejéhez.
+## Root cause
 
-## Gyökérok
+`theoffice.service` and `theoffice-tmux.service` are systemd `--user` units. A user's systemd instance
+(`user@<uid>.service`) starts at boot without a login only if **linger** is enabled for that user
+(`loginctl enable-linger`). Without linger it starts at the first interactive login.
 
-A `theoffice.service` és a `theoffice-tmux.service` **systemd `--user`** unitok.
-Egy user systemd példánya (`user@<uid>.service`) bootkor csak akkor indul el
-belépés nélkül, ha a felhasználóhoz be van kapcsolva a **linger**
-(`loginctl enable-linger`). Linger nélkül a user-instance csak az első
-interaktív bejelentkezéskor indul — ezért fut a fleet login után, de bootkor nem.
+Enabling linger is a privileged action (polkit/root). In a non-interactive install, such as
+`bootstrap.sh` run as `curl ... | bash` without a tty, a plain call is denied.
 
-A `scripts/install.sh` **már próbálja** bekapcsolni a lingert, de a hívás
-hibás módon csendben elbukik:
+## What the installer does now
+
+- tries `sudo -n` first (works with passwordless sudo), then interactive `sudo`, then a plain call;
+- re-reads the `Linger` property afterwards and, if it is still `no`, prints the exact manual command loudly instead
+  of continuing silently;
+- is idempotent: nothing happens if linger is already `yes`.
+
+## Manual fix
 
 ```bash
-loginctl enable-linger "$USER" 2>/dev/null || warn "could not enable linger (services may not survive logout)"
+sudo loginctl enable-linger <user>
+loginctl show-user <user> | grep Linger        # want: Linger=yes
 ```
 
-Három probléma ezzel a sorral:
-
-1. **`sudo` nélkül hívja.** A `loginctl enable-linger` privilegizált művelet
-   (polkit/root kell hozzá). Nem-interaktív telepítéskor — pl. amikor a
-   `bootstrap.sh` `curl ... | bash` formában fut, tty nélkül — a polkit
-   megtagadja.
-2. **Elnyeli a hibát** (`2>/dev/null`), így a telepítés "sikeresnek" látszik,
-   miközben a linger valójában `no` maradt. A `|| warn` üzenet könnyen átsiklik.
-3. **Nem ellenőrzi** utólag, hogy a linger tényleg `yes`-re váltott-e.
-
-Eredmény: `Linger=no` marad, a fleet nem indul bootkor, és a telepítő mégis
-zöld jelzést ad.
-
-## Javítás (mit kell commitolni)
-
-A `scripts/install.sh` 5. lépésében cseréld le a jelenlegi egysoros
-`enable-linger` hívást erre a blokkra:
+## Verify
 
 ```bash
-# ---- 5. enable + start ------------------------------------------------------
-say "Enabling linger (so the fleet starts at boot, without login)"
-if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" = "yes" ]; then
-  say "linger already enabled"
-else
-  # enable-linger needs root/polkit; try passwordless sudo, then interactive sudo,
-  # then a plain call as a last resort.
-  if sudo -n loginctl enable-linger "$USER" 2>/dev/null \
-     || sudo loginctl enable-linger "$USER" 2>/dev/null \
-     || loginctl enable-linger "$USER" 2>/dev/null; then :; fi
-fi
-
-# verify — do NOT continue silently if it failed
-if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
-  warn "LINGER IS STILL OFF. The fleet will NOT start at boot until you run:"
-  warn "    sudo loginctl enable-linger $USER"
-  warn "Verify with: loginctl show-user $USER | grep Linger   # want: Linger=yes"
-fi
-```
-
-A lényegi változások:
-
-- **`sudo`-val próbálja** — előbb `sudo -n` (passwordless setupnál nem akad el),
-  aztán interaktív `sudo`, végül plain fallback.
-- **Ellenőrzi a `Linger` értéket** a hívás után, és ha még mindig `no`,
-  **hangosan, kihagyhatatlanul** kiírja a pontos kézi parancsot — nem nyeli el
-  a hibát.
-- **Idempotens** — ha már `yes`, nem csinál semmit.
-
-### Megjegyzés a `bootstrap.sh`-hoz
-
-A `bootstrap.sh` `curl | bash` formában fut, ahol nincs tty az interaktív
-sudóhoz. A `sudo -n` ág passwordless sudónál megoldja; ahol nincs passwordless
-sudo, ott a hangos warning irányítja a usert a kézi parancsra.
-
-## Ellenőrzés a javítás után
-
-```bash
-# linger be van kapcsolva?
-loginctl show-user "$USER" | grep Linger        # want: Linger=yes
-
-# teljes próba: reboot, majd login NÉLKÜL nézd meg
 sudo reboot
-systemctl --user status theoffice.service       # Active since ≈ boot ideje, nem login
+# after the reboot, WITHOUT logging in interactively first:
+systemctl --user status theoffice.service       # Active since ~ boot time, not login time
 ```
-
-## Azonnali kézi megoldás (a kód javítása nélkül)
-
-Ha most kell, hogy menjen, kézzel elég egyszer:
-
-```bash
-sudo loginctl enable-linger marty
-loginctl show-user marty | grep Linger          # Linger=yes
-```
-
-> Ez a `marty` userön **már be van kapcsolva** (`Linger=yes`, 2026-06-10).
-> A fenti telepítő-javítás a jövőbeli / másik gépre szóló telepítésekre kell,
-> hogy ne forduljon elő újra.

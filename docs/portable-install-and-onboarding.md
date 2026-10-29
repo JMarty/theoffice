@@ -16,14 +16,9 @@ is merely the first capability to use B. Ships to origin.
 - IDEMPOTENT: re-run re-renders + overwrites the unit, enable --now is a no-op if already enabled, verify re-checks. Safe to run any number of times.
 
 **watchd.service.template** replaces the hardcoded .service (the wart). Tokens:
-`Environment=OFFICE_TENANT_ROOT=@OFFICE_TENANT_ROOT@`, `ExecStart=@PYTHON@ @REPO_ROOT@/tools/watchd/watchd.py`. Keeps MemoryHigh/Max caps + Restart=always. The old watchd.service (hardcoded /opt/claude/theoffice) is DELETED.
+`Environment=OFFICE_TENANT_ROOT=@OFFICE_TENANT_ROOT@`, `ExecStart=@PYTHON@ @REPO_ROOT@/tools/watchd/watchd.py`. Keeps MemoryHigh/Max caps + Restart=always. The old watchd.service (hardcoded install paths) is DELETED.
 
-**watchd.py**: `WATCHD_API_BASE` default → `http://127.0.0.1:3430` (watchd runs on the same box as the dashboard, so loopback is universally correct). Keep the env override. Do NOT ship our LAN IP (192.168.10.162) as a default — our tenant sets it via env only if ever needed (it isn't; the HA-push case that motivated it was dropped). The tenant-specific Kia CHECK script keeps its Traccar IP — it is tenant config, not shipped framework.
-
-## PART B — generic post-update setup notice (the real ask)
-
-### Declaration convention: MANIFEST FILE `tools/<cap>/POST_UPDATE.md` (chosen over a `Setup-Notice:` commit trailer)
-Justification: (1) self-describing + co-located with the capability — discoverable, not buried in one commit message; (2) rich markdown the main agent can relay to the owner verbatim (what it is, what install.sh does, the one command); (3) robust to a feature landing over MULTIPLE commits (a trailer must sit on exactly the "completing" commit; a file just has to exist); (4) generic — ANY `tools/*/POST_UPDATE.md` auto-participates, zero per-capability framework code. The commit-trailer's only edge (reuse body parsing) is outweighed; we still USE the applied-commit info, just to detect which manifests changed (below), not to carry the text.
+**watchd.py**: `WATCHD_API_BASE` default → `http://127.0.0.1:3430` (watchd runs on the same box as the dashboard, so loopback is universally correct). Keep the env override. Do NOT ship a LAN IP as a default; a tenant that needs a non-loopback base sets it via env.sh does, the one command); (3) robust to a feature landing over MULTIPLE commits (a trailer must sit on exactly the "completing" commit; a file just has to exist); (4) generic — ANY `tools/*/POST_UPDATE.md` auto-participates, zero per-capability framework code. The commit-trailer's only edge (reuse body parsing) is outweighed; we still USE the applied-commit info, just to detect which manifests changed (below), not to carry the text.
 
 Manifest front-matter (parsed): `capability:` (id), `installed-check:` (a shell test that exits 0 when already set up, e.g. `systemctl --user is-active watchd.service`), `install:` (the command to offer, e.g. `tools/watchd/install.sh`). Body = the human notice.
 

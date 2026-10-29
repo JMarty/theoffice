@@ -26,7 +26,7 @@ fi
 
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TENANT_ROOT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
-TZ_VALUE="${OFFICE_TZ:-Europe/Budapest}"
+TZ_VALUE="${OFFICE_TZ:-UTC}"
 SOCKET="${OFFICE_TMUX_SOCKET:-theoffice}"
 UNIT_DIR="$HOME/.config/systemd/user"
 USER_NAME="$(id -un)"  # reliable even when $USER is unset (fresh/headless env)
@@ -118,6 +118,32 @@ if [ -d "$INSTALL_DIR/templates/scheduled-tasks" ]; then
   done
 fi
 
+# Seed the office METHODOLOGY from templates/ (generic skills, fleet rules, tools, agent personas; exported nightly from the running office,
+# see templates/OFFICE-EXPORT.md). ONLY IF ABSENT, never clobbers anything you already have.
+#   OFFICE_SEED=base (default): skills (tenant + ~/.claude/skills), FLEET-RULES.md, AGENT-CONVENTIONS.md, tools.
+#   OFFICE_SEED=full: also the ten agent personas (seeded DISABLED: enable the ones you want in agent.json).   OFFICE_SEED=none: skip.
+_SEED="${OFFICE_SEED:-base}"
+if [ "$_SEED" != "none" ] && [ -d "$INSTALL_DIR/templates/skills" ]; then
+  say "Seeding the office methodology from templates/ (mode: $_SEED; existing files are kept)"
+  mkdir -p "$TENANT_ROOT/skills" "$TENANT_ROOT/tools" "$HOME/.claude/skills"
+  cp -rn "$INSTALL_DIR/templates/skills/." "$TENANT_ROOT/skills/" 2>/dev/null || true
+  cp -rn "$INSTALL_DIR/templates/skills/." "$HOME/.claude/skills/" 2>/dev/null || true
+  [ -d "$INSTALL_DIR/templates/tools" ] && { cp -rn "$INSTALL_DIR/templates/tools/." "$TENANT_ROOT/tools/" 2>/dev/null || true; }
+  for _f in FLEET-RULES.md AGENT-CONVENTIONS.md; do
+    [ -f "$INSTALL_DIR/templates/tenant/$_f" ] && [ ! -e "$TENANT_ROOT/$_f" ] && cp "$INSTALL_DIR/templates/tenant/$_f" "$TENANT_ROOT/$_f"
+  done
+  if [ "$_SEED" = "full" ] && [ -d "$INSTALL_DIR/templates/agents" ]; then
+    for _a in "$INSTALL_DIR"/templates/agents/*/; do
+      _id=$(basename "$_a")
+      if [ -d "$_a" ] && [ ! -e "$TENANT_ROOT/agents/$_id" ]; then
+        cp -r "$_a" "$TENANT_ROOT/agents/$_id"
+        [ -f "$TENANT_ROOT/agents/$_id/agent.json" ] && node -e 'const f=process.argv[1],fs=require("fs");const c=JSON.parse(fs.readFileSync(f,"utf8"));c.enabled=false;fs.writeFileSync(f,JSON.stringify(c,null,2)+"\n")' "$TENANT_ROOT/agents/$_id/agent.json" || true
+        say "seeded agent persona (disabled): $_id"
+      fi
+    done
+  fi
+fi
+
 # ---- 3b. dashboard bind: localhost vs LAN -----------------------------------
 # Default 127.0.0.1 (safe — only this machine / SSH tunnel). LAN (0.0.0.0) lets
 # any device on the home network reach it (phone, laptop). Choose via prompt when
@@ -191,6 +217,26 @@ Environment=OFFICE_HOST=$BIND_HOST
 WantedBy=default.target
 EOF
 
+# ---- 4b. watchdog + backup unit templates ----------------------------------
+# templates/units/*.service|timer carry @ROOT@ (engine checkout), @TENANT@ and @TZ@; rendered into the user unit dir.
+# OFFICE_WATCHDOGS=core (default: the detect-only reliability set) | all (also backup, offsite push, embed, oomwatch, modal sweeper) | none
+WATCHDOGS="${OFFICE_WATCHDOGS:-core}"
+CORE_TIMERS="service-health owner-watchdog owner-ack-guard drift-detect context-watchdog frozen-pane-alarm disk-watch"
+if [ "$WATCHDOGS" != "none" ] && [ -d "$INSTALL_DIR/templates/units" ]; then
+  say "Installing watchdog units ($WATCHDOGS)"
+  mkdir -p "$TENANT_ROOT/tools"
+  for f in "$INSTALL_DIR"/templates/units/*.service "$INSTALL_DIR"/templates/units/*.timer; do
+    [ -f "$f" ] || continue
+    sed -e "s#@ROOT@#$INSTALL_DIR#g" -e "s#@TENANT@#$TENANT_ROOT#g" -e "s#@TZ@#$TZ_VALUE#g" "$f" > "$UNIT_DIR/$(basename "$f")"
+  done
+  # act.conf (context-watchdog /compact action) is NOT installed by default: opt in by copying it to context-watchdog.service.d/
+  if [ "$WATCHDOGS" = "all" ]; then
+    WATCH_ENABLE="$(cd "$INSTALL_DIR/templates/units" && ls *.timer | sed 's/\.timer$//')"
+  else
+    WATCH_ENABLE="$CORE_TIMERS"
+  fi
+fi
+
 # ---- 5. enable + start ------------------------------------------------------
 # Linger lets the user's systemd instance (user@<uid>.service) start at boot
 # WITHOUT an interactive login — otherwise the fleet only comes up when someone
@@ -216,6 +262,7 @@ say "Starting services"
 systemctl --user daemon-reload
 systemctl --user enable --now theoffice-tmux.service
 systemctl --user enable --now theoffice.service
+for t in ${WATCH_ENABLE:-}; do systemctl --user enable --now "$t.timer" 2>/dev/null || warn "could not enable $t.timer"; done
 
 # Wait for the engine to write its token rather than racing a fixed sleep on a slow box.
 TOKEN_FILE="$TENANT_ROOT/store/.dashboard-token"

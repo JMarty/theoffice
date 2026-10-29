@@ -44,8 +44,8 @@ export const MIGRATIONS: Migration[] = [
     name: "inbound_queue orphan tracking",
     // Orphan-requeue (kanban aba29f60). A message handed to a session that then DIES is currently lost
     // forever: 'delivered' is terminal on this table, so nothing can tell "the agent read it" from "the
-    // agent was OOM-killed three seconds later". Proven live 2026-08-01 — an owner message sat 36 minutes
-    // against a system that considered it handled.
+    // agent was OOM-killed three seconds later". The result is a user message sitting unanswered against a
+    // system that considers it handled.
     //
     // session_ref: WHICH session instance received it (tmux #{session_created}). Identity, not doneness —
     //   doneness does not exist here. NULL on every pre-existing row, which is also the gate that keeps
@@ -96,7 +96,7 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 6,
     name: "inbound_queue owner-alarm dedup",
-    // The owner-delivery watchdog (2026-08-04) alarms Szoszo when a source='channel' message is dropped
+    // The owner-delivery watchdog (2026-08-04) alarms the owner when a source='channel' message is dropped
     // (status=failed) OR sits queued+undelivered past a threshold — the queued case being the one the
     // 2026-08-04 outage actually hit (messages parked behind a modal, never attempted, never failed).
     // owner_alarmed_at records the last time we alarmed about a row so the watchdog fires once per drop
@@ -127,7 +127,7 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 8,
     name: "owner_cards",
-    // Owner Board v1.1 (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md, owner GO 2026-09-27). A board only
+    // Owner Board v1.1 (owner board spec v1.1). A board only
     // the owner uses: agents post short cards, he answers via a comment thread and picks a tray (now/batch)
     // per answer. New tables -> migration-only (Model A), never SCHEMA_SQL. Separate from kanban_cards by
     // design (hard constraint in the spec): no FK, no shared endpoints, the migration below only READS it.
@@ -158,6 +158,25 @@ export const MIGRATIONS: Migration[] = [
           );
           CREATE INDEX idx_occ_card ON owner_card_comments(card_id);
           CREATE INDEX idx_occ_unsent ON owner_card_comments(tray, sent_at);`,
+  },
+  {
+    version: 9,
+    name: "task_runs completion bookkeeping",
+    // task_runs only recorded that a scheduled task was FIRED, so a run that was delivered and a run that was
+    // finished looked identical for ever. completed_at/outcome are written by the agent through
+    // POST /api/task-runs/:id/complete; inbound_id links the run to its queue row; expects_completion marks runs
+    // whose prompt carried the completion instruction (0 for every pre-migration row and for heartbeats, so
+    // history never raises an alarm); fired_at is the REAL fire time (ts is the occurrence time, hours old for a
+    // catch-up run, so ageing from ts would alarm a freshly fired catch-up run immediately); alarmed_at/delivery are written by the unfinished-run sweep, once per run.
+    // Additive, so every existing query and old row stays valid. Migration-only (Model A), never SCHEMA_SQL.
+    sql: `ALTER TABLE task_runs ADD COLUMN completed_at INTEGER;
+          ALTER TABLE task_runs ADD COLUMN outcome TEXT;
+          ALTER TABLE task_runs ADD COLUMN delivery TEXT;
+          ALTER TABLE task_runs ADD COLUMN inbound_id INTEGER;
+          ALTER TABLE task_runs ADD COLUMN alarmed_at INTEGER;
+          ALTER TABLE task_runs ADD COLUMN expects_completion INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE task_runs ADD COLUMN fired_at INTEGER;
+          CREATE INDEX idx_task_runs_open ON task_runs(completed_at, ts);`,
   },
 ];
 

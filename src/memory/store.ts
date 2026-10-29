@@ -233,7 +233,7 @@ export interface VectorSearchArgs {
  *
  * Scored in JS rather than SQL because SQLite has no vector type here; at a few thousand rows this is
  * a sub-millisecond scan. Every comparison goes through cosineSimilarity, which returns 0 on a length
- * mismatch, so a legacy or malformed vector is ranked out rather than raw-indexed (Toby's gate).
+ * mismatch, so a legacy or malformed vector is ranked out rather than raw-indexed.
  */
 export function searchMemoriesByVector(a: VectorSearchArgs): MemoryRow[] {
   const cats = a.category ? (Array.isArray(a.category) ? a.category : [a.category]) : [];
@@ -301,8 +301,8 @@ export async function searchMemoriesHybrid(
   // and not the row containing the string. Same starvation the topical reserve fixes in recall.
   // Keywords get a SMALL absolute share, never half. FTS output here is measurably noisy, so at a
   // small limit a half-share pushed the correct semantic answer out of the results entirely: asking
-  // "how many rooms does the rental flat have" with limit=3 returned two vector hits plus one piece of
-  // FTS noise, dropping the flat-specs memory that scored 0.641 and ranked 3rd.
+  // "how many rooms does the office have" with limit=3 returned two vector hits plus one piece of
+  // FTS noise, dropping the property-specs memory that scored 0.641 and ranked 3rd.
   const keywordShare = Math.min(2, Math.max(0, limit - 3));
   const vectorShare = limit - keywordShare;
   const vecHits = searchMemoriesByVector({

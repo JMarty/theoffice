@@ -8,8 +8,8 @@ import { saveMemory, attachEmbedding, countEmbeddings } from "./store.js";
 
 /**
  * Saving a memory must NEVER depend on Ollama being up. The vector is an enhancement; the memory is
- * the asset. These tests pin that contract, because the failure mode we are fixing (2026-08-03) was
- * exactly a silent gap between "memory saved" and "memory searchable by meaning".
+ * the asset. These tests pin that contract, because the failure mode being guarded against is a
+ * silent gap between "memory saved" and "memory searchable by meaning".
  */
 
 let dir: string;
@@ -29,8 +29,8 @@ const embeddingOf = (id: number) =>
 describe("attachEmbedding", () => {
   it("writes the vector onto the row", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ embedding: Array(EXPECTED_DIM).fill(0.5) }) })));
-    const id = saveMemory({ agentId: "a", content: "the flat on Baker Street" });
-    expect(await attachEmbedding(id, "the flat on Baker Street")).toBe(true);
+    const id = saveMemory({ agentId: "a", content: "the office on Main Street" });
+    expect(await attachEmbedding(id, "the office on Main Street")).toBe(true);
     expect(JSON.parse(embeddingOf(id)!)).toHaveLength(EXPECTED_DIM);
   });
 
@@ -56,11 +56,11 @@ describe("saveMemory never blocks on the embedder", () => {
   });
 });
 
-describe("live embed-on-save is opt-in (default OFF) — a save never wakes bge-m3 (2026-08-04)", () => {
-  // On the shared box a synchronous embed on EVERY save resets OLLAMA_KEEP_ALIVE, so the 1.1G model
-  // never unloads (it stayed resident ~permanently). Decoupled: with the flag off a save writes no
-  // vector and never calls the embedder; the daily backfill (office-embed-backfill.timer) vectorizes
-  // at 04:00 while the model is loaded only for that window. OFFICE_EMBED_ON_SAVE=1 restores it.
+describe("live embed-on-save is opt-in (default OFF) — a save never wakes the embedding model", () => {
+  // A synchronous embed on EVERY save resets the model keep-alive timer, so the model never unloads.
+  // Decoupled: with the flag off a save writes no vector and never calls the embedder; a scheduled
+  // backfill vectorizes rows while the model is loaded only for that window. OFFICE_EMBED_ON_SAVE=1
+  // restores the live behaviour.
   const flush = () => new Promise<void>((r) => setImmediate(r));
   afterEach(() => { delete process.env.OFFICE_EMBED_ON_SAVE; });
 
@@ -84,8 +84,8 @@ describe("live embed-on-save is opt-in (default OFF) — a save never wakes bge-
   });
 });
 
-describe("countEmbeddings — the observability that was missing", () => {
-  it("reports total vs embedded so the gap can never go unnoticed again", async () => {
+describe("countEmbeddings — coverage observability", () => {
+  it("reports total vs embedded so a gap cannot go unnoticed", async () => {
     const c = countEmbeddings();
     expect(c.total).toBeGreaterThan(0);
     expect(c.embedded).toBeGreaterThanOrEqual(1);
@@ -112,12 +112,12 @@ describe("countEmbeddings — the observability that was missing", () => {
     // (coverageVerdict's carve-out of unembeddable from the denominator is unit-tested in embed-cli.test.ts)
   });
 
-  it("content empty but keywords PRESENT -> EMBEDDABLE, NOT un-embeddable (over-exclusion guard, Michael 9663)", () => {
+  it("content empty but keywords PRESENT -> EMBEDDABLE, NOT un-embeddable (over-exclusion guard)", () => {
     // The exact edge a naive content-only clause would silently break: keywords alone make the row
     // embeddable (embeddableText = `${content}\n${keywords}`), so it MUST stay in the coverage denominator,
     // not be dropped. Pins the rule as BOTH-empty, never content-only.
     const before = countEmbeddings().unembeddable;
-    saveMemory({ agentId: "kw", content: "   ", keywords: "a real searchable keyword" });
+    saveMemory({ agentId: "kw", content: "   ", keywords: "a searchable keyword" });
     expect(countEmbeddings().unembeddable).toBe(before); // did NOT increment — keywords keep it embeddable
   });
 });
@@ -127,6 +127,6 @@ describe("attachEmbedding reports what actually happened", () => {
     // Cosmetic but it is a truth claim: returning true for a zero-row UPDATE would let a caller
     // believe a vector landed when nothing was written.
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ embedding: Array(EXPECTED_DIM).fill(0.2) }) })));
-    expect(await attachEmbedding(999_999, "nonexistent row")).toBe(false);
+    expect(await attachEmbedding(999_999, "missing row")).toBe(false);
   });
 });

@@ -9,14 +9,10 @@ import { coverageVerdict, exitCodeFor } from "./embed-cli.js";
 
 /**
  * Cross-language consistency, TS half. The "is this NULL row embeddable" rule lives in TWO languages —
- * store.ts countEmbeddings (this side) and tenant/store/watchd-checks/memory_embedding_health.py
- * (UNEMBEDDABLE_SQL) — and they must never disagree, or coverage and the alarm read the same store
- * differently. The TS side asserts against the SAME shared fixture (../__fixtures__/embeddable-boundary.json)
- * so a TS-clause edit that diverges from the fixture goes red HERE at edit-time. A matching .py-side test
- * (test_emptiness_boundary.py) that would guard the .py clause the same way is DEFERRED (card 20c2d64b):
- * it cannot be a CI edit-time gate while memory_embedding_health.py is gitignored (/tenant/**), so until it
- * exists the .py side is guarded by the UNEMBEDDABLE_SQL single-source constant + the runtime tripwire.
- * The NULL-keywords rows are the load-bearing ones — the likeliest drift is one side COALESCE-ing null
+ * store.ts countEmbeddings (this side) and a separate health-check script (UNEMBEDDABLE_SQL) — and
+ * they must never disagree, or coverage and the alarm read the same store differently. The TS side
+ * asserts against the SAME shared fixture (../__fixtures__/embeddable-boundary.json) so a TS-clause
+ * edit that diverges from the fixture goes red HERE at edit-time. The NULL-keywords rows are the load-bearing ones — the likeliest drift is one side COALESCE-ing null
  * keywords and the other not.
  */
 const fixture = JSON.parse(
@@ -63,7 +59,7 @@ describe("emptiness boundary — TS countEmbeddings rule agrees with the shared 
     const vec = JSON.stringify(Array(1024).fill(0.1)); // a valid 1024-dim vector == usable
     for (let i = 0; i < 3; i++) {
       db.prepare("INSERT INTO memories(agent_id, category, content, keywords, embedding) VALUES('c','warm',?,?,?)").run(
-        `real ${i}`, null, vec,
+        `row ${i}`, null, vec,
       );
     }
     db.prepare("INSERT INTO memories(agent_id, category, content, keywords) VALUES('c','warm','','')").run(); // un-embeddable NULL

@@ -3,9 +3,13 @@ import { getDb } from "../db/index.js";
 import { sendAgentMessage } from "../bus/index.js";
 import { isDueNow, minuteKey } from "../scheduler/cron.js";
 import { log } from "../logger.js";
+import { loadConfig } from "../config.js";
+
+/** the owner's stored author handle, from config (default "owner") */
+export const ownerHandle = (): string => loadConfig().owner.handle ?? "owner";
 
 /**
- * Owner Board v1.1 (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md, owner GO 2026-09-27). A board only
+ * Owner Board v1.1 (owner board spec v1.1). A board only
  * the owner uses: agents post short cards, he answers via a per-card comment thread and picks a tray
  * (NOW or BATCH) per answer. Sends bundle ALL of one agent's unsent comments for a tray into ONE bus
  * message, so an agent is woken at most once per send. Fully separate from kanban_cards (hard constraint):
@@ -151,7 +155,7 @@ export function listCards(a: ListArgs = {}): (CardRow & { comment_count: number 
 // ---------------- comments ----------------
 
 export interface OwnerCommentArgs {
-  author: "szoszo";
+  author: string;
   text: string;
   tray: "now" | "batch";
 }
@@ -169,15 +173,15 @@ export function addComment(cardId: string, a: OwnerCommentArgs | AgentCommentArg
     return { ok: false, code: 400, error: `text must be 1-${MAX_COMMENT} chars (got ${a.text?.length ?? 0})` };
   }
 
-  const isOwner = a.author === "szoszo";
+  const isOwner = a.author === ownerHandle();
   if (isOwner) {
     const tray = (a as OwnerCommentArgs).tray;
     if (tray !== "now" && tray !== "batch") {
       return { ok: false, code: 400, error: `owner comment requires tray 'now' or 'batch' (got ${JSON.stringify(tray)})` };
     }
     const r = getDb()
-      .prepare(`INSERT INTO owner_card_comments (card_id, author, text, tray) VALUES (?, 'szoszo', ?, ?)`)
-      .run(cardId, a.text, tray);
+      .prepare(`INSERT INTO owner_card_comments (card_id, author, text, tray) VALUES (?, ?, ?, ?)`)
+      .run(cardId, ownerHandle(), a.text, tray);
     getDb().prepare(`UPDATE owner_cards SET status='answered', updated_at=unixepoch() WHERE id=?`).run(cardId);
     return { ok: true, id: Number(r.lastInsertRowid) };
   }
@@ -234,7 +238,7 @@ export function dropCard(id: string, a: { note?: string } = {}): OpResult {
     return { ok: false, code: 409, error: `card must be open or answered to drop (current status: ${card.status})` };
   }
   const text = `DROPPED: ${a.note || "no note"}. Do not raise this again.`;
-  getDb().prepare(`INSERT INTO owner_card_comments (card_id, author, text, tray) VALUES (?, 'szoszo', ?, 'now')`).run(id, text);
+  getDb().prepare(`INSERT INTO owner_card_comments (card_id, author, text, tray) VALUES (?, ?, ?, 'now')`).run(id, ownerHandle(), text);
   getDb().prepare(`UPDATE owner_cards SET status='dropped', updated_at=unixepoch() WHERE id=?`).run(id);
   return { ok: true, id };
 }
@@ -298,10 +302,10 @@ export function sendTray(tray: "now" | "batch", deps: SendDeps = {}): SendResult
     .prepare(
       `SELECT occ.id AS comment_id, occ.text, occ.created_at, c.id AS card_id, c.title, c.agent
        FROM owner_card_comments occ JOIN owner_cards c ON c.id = occ.card_id
-       WHERE occ.author='szoszo' AND occ.tray=? AND occ.sent_at IS NULL
+       WHERE occ.author=? AND occ.tray=? AND occ.sent_at IS NULL
        ORDER BY occ.created_at ASC, occ.id ASC`
     )
-    .all(tray) as UnsentRow[];
+    .all(ownerHandle(), tray) as UnsentRow[];
 
   if (rows.length === 0) return { sent: 0, agents: 0 };
 
@@ -316,7 +320,7 @@ export function sendTray(tray: "now" | "batch", deps: SendDeps = {}): SendResult
   for (const [agent, list] of byAgent) {
     const text = buildBundle(list);
     try {
-      send("szoszo-board", agent, text);
+      send(`${ownerHandle()}-board`, agent, text);
     } catch (err) {
       logger.warn({ err, agent, tray }, "owner-board send failed for one agent — comments left unsent, others proceed");
       continue;

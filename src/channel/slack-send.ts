@@ -38,7 +38,7 @@ export function makeOutboundTick(deps: {
           markOutboundFailed(item.id, "no bot token for agent");
           continue;
         }
-        // SPLIT FAILURE DOMAINS (Toby's load-bearing fix). markOutboundFailed — which returns a row
+        // SPLIT FAILURE DOMAINS. markOutboundFailed — which returns a row
         // to 'queued' and lets the next tick re-post — must be reachable ONLY when the post did NOT
         // happen. If we lumped post + bookkeeping in one try (the old bug), a throw from
         // markOutboundSent (variant b) or recordOutbound (variant a) AFTER Slack already accepted

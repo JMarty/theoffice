@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, closeDb, getDb } from "../db/index.js";
+import { ownerHandle } from "./owner-cards.js";
 import {
   createCard,
   getCard,
@@ -20,6 +21,14 @@ import {
   MAX_OPTIONS,
 } from "./owner-cards.js";
 import { migrateOwnerCards } from "../../scripts/migrate-owner-cards.js";
+
+// deterministic config: tests must not depend on the tenant's real overrides
+const cfgState = vi.hoisted(() => ({ over: {} as Record<string, unknown> }));
+vi.mock("../config.js", async (orig) => {
+  const m = await orig<typeof import("../config.js")>();
+  return { ...m, loadConfig: () => { const c = m.loadConfig(); return { ...c, owner: { ...c.owner, handle: undefined }, briefingSections: undefined, briefingHealthDenyExtra: undefined, ...cfgState.over }; } };
+});
+
 
 const AGENTS = ["cfo", "pam", "darryl", "marveen"];
 let dir: string;
@@ -82,19 +91,19 @@ describe("1. create() validation", () => {
 describe("2. owner comments", () => {
   it("owner comment on an open card moves it to answered", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "szoszo", text: "answer", tray: "now" });
+    const r = addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     expect(r.ok).toBe(true);
     expect(getCard(id)!.card.status).toBe("answered");
   });
   it("owner comment without tray -> 400", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "szoszo", text: "answer" } as any);
+    const r = addComment(id, { author: ownerHandle(), text: "answer" } as any);
     expect(r.ok).toBe(false);
     expect(r.code).toBe(400);
   });
   it("text > 10000 chars -> 400", () => {
     const id = mkCard();
-    const r = addComment(id, { author: "szoszo", text: "x".repeat(10001), tray: "now" });
+    const r = addComment(id, { author: ownerHandle(), text: "x".repeat(10001), tray: "now" });
     expect(r.ok).toBe(false);
     expect(r.code).toBe(400);
   });
@@ -106,15 +115,15 @@ describe("3. send('now') bundling", () => {
     const c2 = mkCard("cfo", { title: "cfo card two" });
     const p1 = mkCard("pam", { title: "pam card" });
     const bigText = "y".repeat(5000);
-    addComment(c1, { author: "szoszo", text: "short answer one", tray: "now" });
-    addComment(c2, { author: "szoszo", text: bigText, tray: "now" });
-    addComment(p1, { author: "szoszo", text: "pam answer", tray: "now" });
+    addComment(c1, { author: ownerHandle(), text: "short answer one", tray: "now" });
+    addComment(c2, { author: ownerHandle(), text: bigText, tray: "now" });
+    addComment(p1, { author: ownerHandle(), text: "pam answer", tray: "now" });
 
     const res = sendTray("now");
     expect(res.sent).toBe(3);
     expect(res.agents).toBe(2);
 
-    const msgs = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='szoszo-board'`).all() as any[];
+    const msgs = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='${ownerHandle()}-board'`).all() as any[];
     expect(msgs.length).toBe(2);
     const cfoMsg = msgs.find((m) => m.to_agent === "cfo")!;
     expect(cfoMsg).toBeTruthy();
@@ -130,8 +139,8 @@ describe("3. send('now') bundling", () => {
 describe("4. send() respects tray", () => {
   it("send('now') ignores batch comments and vice versa", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "szoszo", text: "now-answer", tray: "now" });
-    addComment(id, { author: "szoszo", text: "batch-answer", tray: "batch" });
+    addComment(id, { author: ownerHandle(), text: "now-answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "batch-answer", tray: "batch" });
 
     const now = sendTray("now");
     expect(now.sent).toBe(1);
@@ -156,7 +165,7 @@ describe("5. drop", () => {
 
     const res = sendTray("now");
     expect(res.sent).toBe(1);
-    const msg = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='szoszo-board'`).get() as any;
+    const msg = getDb().prepare(`SELECT * FROM agent_messages WHERE from_agent='${ownerHandle()}-board'`).get() as any;
     expect(msg.content).toContain("DROPPED");
 
     expect(getCard(id)!.card.status).toBe("dropped");
@@ -176,8 +185,8 @@ describe("7. per-agent send failure isolation", () => {
   it("a throwing send for one agent leaves its comments unsent + card answered, still sends others", () => {
     const cfoId = mkCard("cfo");
     const pamId = mkCard("pam");
-    addComment(cfoId, { author: "szoszo", text: "to cfo", tray: "now" });
-    addComment(pamId, { author: "szoszo", text: "to pam", tray: "now" });
+    addComment(cfoId, { author: ownerHandle(), text: "to cfo", tray: "now" });
+    addComment(pamId, { author: ownerHandle(), text: "to pam", tray: "now" });
 
     const res = sendTray("now", {
       send: (from, to, content) => {
@@ -199,7 +208,7 @@ describe("7. per-agent send failure isolation", () => {
 describe("8. agent comments and needs_you", () => {
   it("needs_you=1 on a sent card -> open; without it -> unchanged", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "szoszo", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     sendTray("now");
     expect(getCard(id)!.card.status).toBe("sent");
 
@@ -216,7 +225,7 @@ describe("8. agent comments and needs_you", () => {
 describe("9. PATCH an already-sent comment", () => {
   it("-> 409", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "szoszo", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     const comment = getDb().prepare(`SELECT id FROM owner_card_comments WHERE card_id=?`).get(id) as any;
     sendTray("now");
     const r = patchComment(comment.id, { text: "edited" });
@@ -225,7 +234,7 @@ describe("9. PATCH an already-sent comment", () => {
   });
   it("allows editing an unsent comment", () => {
     const id = mkCard("cfo");
-    addComment(id, { author: "szoszo", text: "answer", tray: "now" });
+    addComment(id, { author: ownerHandle(), text: "answer", tray: "now" });
     const comment = getDb().prepare(`SELECT id FROM owner_card_comments WHERE card_id=?`).get(id) as any;
     const r = patchComment(comment.id, { text: "edited", tray: "batch" });
     expect(r.ok).toBe(true);
@@ -268,14 +277,14 @@ describe("11. renderText — escape then linkify", () => {
 });
 
 describe("12. migration of old owner cards", () => {
-  it("migrates only assignee='szoszo' rows, maps status/closed_via, is idempotent", () => {
+  it("migrates only assignee='owner' rows, maps status/closed_via, is idempotent", () => {
     const db = getDb();
     const ins = db.prepare(
       `INSERT INTO kanban_cards (id, title, description, status, assignee, archived_at) VALUES (?, ?, ?, ?, ?, ?)`
     );
-    ins.run("k1", "live planned for szoszo", "d1", "planned", "szoszo", null);
-    ins.run("k2", "done for szoszo", "d2", "done", "szoszo", null);
-    ins.run("k3", "archived waiting for szoszo", "d3", "waiting", "szoszo", Math.floor(Date.now() / 1000));
+    ins.run("k1", "live planned for owner", "d1", "planned", ownerHandle(), null);
+    ins.run("k2", "done for owner", "d2", "done", ownerHandle(), null);
+    ins.run("k3", "archived waiting for owner", "d3", "waiting", ownerHandle(), Math.floor(Date.now() / 1000));
     ins.run("k4", "darryl's own card", "d4", "planned", "darryl", null);
     const kanbanCountBefore = (db.prepare(`SELECT COUNT(*) n FROM kanban_cards`).get() as any).n;
 
@@ -304,20 +313,20 @@ describe("12. migration of old owner cards", () => {
 });
 
 describe("13. batch timer", () => {
-  it("fires once at 06:00 Budapest, not twice in the same minute, not at 06:00 UTC", () => {
+  it("fires once at 06:00 Paris, not twice in the same minute, not at 06:00 UTC", () => {
     let fires = 0;
-    const tick = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Budapest", () => { fires++; });
+    const tick = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Paris", () => { fires++; });
 
-    // 2026-09-27 06:00 Europe/Budapest == 04:00 UTC (CEST, UTC+2)
-    const at0600Budapest = Date.parse("2026-09-27T04:00:00.000Z");
-    tick(at0600Budapest);
+    // 2026-09-27 06:00 Europe/Paris == 04:00 UTC (CEST, UTC+2)
+    const at0600Paris = Date.parse("2026-09-27T04:00:00.000Z");
+    tick(at0600Paris);
     expect(fires).toBe(1);
-    tick(at0600Budapest + 30_000); // same minute, second tick
+    tick(at0600Paris + 30_000); // same minute, second tick
     expect(fires).toBe(1);
 
-    // 06:00 UTC is 08:00 Budapest — not one of the three cron times
+    // 06:00 UTC is 08:00 Paris — not one of the three cron times
     fires = 0;
-    const tick2 = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Budapest", () => { fires++; });
+    const tick2 = createBatchTicker(DEFAULT_BATCH_CRON, "Europe/Paris", () => { fires++; });
     tick2(Date.parse("2026-09-27T06:00:00.000Z"));
     expect(fires).toBe(0);
   });

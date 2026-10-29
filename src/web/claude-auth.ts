@@ -11,8 +11,8 @@
 //      that process can authenticate. The dashboard was fully green during a total outage.
 //   2. THE ONLY FIX NEEDED A TERMINAL. Emergency Restart cannot help: restarting a pane just makes it
 //      re-read ~/.claude/.credentials.json, so if the on-disk credential is still expired the fresh
-//      pane comes up equally dead. The owner restarted three times before the credential was renewed
-//      and reasonably concluded the button was broken. The real fix — `/login` — was terminal-only.
+//      pane comes up equally dead. Repeated restarts therefore look like a broken button. The real fix
+//      — `/login` — was terminal-only.
 //
 // So this module does three things, all reachable from a phone:
 //   - DETECT   getAuthHealth(): reads the credential AND scans the live panes for the signed-out banner.
@@ -41,7 +41,7 @@ const LOGIN_SESSION = "__office-login";
 const LOGIN_COLS = 500;
 const LOGIN_ROWS = 50;
 
-/** Credential file every agent on this box shares (agents inherit HOME=szoszo). */
+/** Credential file every agent on this box shares (agents inherit the owner HOME). */
 export const CREDENTIALS_FILE = join(homedir(), ".claude", ".credentials.json");
 
 /**
@@ -253,7 +253,21 @@ export function readCredentialState(file: string = CREDENTIALS_FILE): Credential
  * lines that only form the banner once concatenated are prose, not a banner.
  */
 export function paneLooksSignedOut(pane: string): boolean {
-  return SIGNED_OUT_RX.test(pane);
+  return SIGNED_OUT_RX.test(pane) || paneLooksStale401(pane);
+}
+
+/**
+ * The post-reauth state our own runbook documents (claude-agent-auth-restart): the owner signed in again but a
+ * resident pane keeps answering `API Error: 401 ... Invalid authentication credentials` until it restarts.
+ * That text can also be QUOTED by an agent that is reviewing an outage, so this fallback is deliberately narrow:
+ * the pane must be a clean idle prompt (a pane that is mid-turn is never judged by it) AND both fragments must
+ * sit in the last lines of the capture. Assembled from parts so this file never contains the phrase itself.
+ */
+const STALE_401_PARTS = ["API Error: 401", "Invalid authentication " + "credentials"];
+export function paneLooksStale401(pane: string): boolean {
+  if (detectPaneState(pane) !== "idle") return false;
+  const tail = pane.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12).join("\n");
+  return STALE_401_PARTS.every((p) => tail.includes(p));
 }
 
 /**

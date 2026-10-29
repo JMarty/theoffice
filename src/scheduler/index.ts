@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineConfig, ScheduledTaskType } from "../types.js";
 import { enqueueInbound } from "../queue/index.js";
+import { sendAgentMessage } from "../bus/index.js";
+import { alarmDigest, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
 import { getDb } from "../db/index.js";
 import { isDueNow, minuteKey, lastOccurrenceBefore } from "./cron.js";
 import { log } from "../logger.js";
@@ -11,6 +13,7 @@ const TICK_MS = 30_000; // sub-minute; per-minute dedup makes double-fire imposs
 // Boot catch-up looks back at most this far for occurrences missed while the engine was down — bounds the
 // work and avoids replaying ancient misses after a long outage.
 const CATCHUP_MAX_MS = 6 * 60 * 60 * 1000;
+const SWEEP_MAX = 5; // alarms per tick: a backlog (e.g. after an outage) cannot flood the main agent
 
 export interface ScheduledTask {
   name: string;
@@ -70,12 +73,47 @@ export function loadScheduledTasks(cfg: EngineConfig): ScheduledTask[] {
   return out;
 }
 
-function wrap(task: ScheduledTask): string {
+function wrap(task: ScheduledTask, runId?: number): string {
   const header =
     task.type === "heartbeat"
       ? `[Scheduled heartbeat: ${task.name}] Silent check — only message the owner if something is genuinely important or time-sensitive. Otherwise do the check and stay quiet.`
       : `[Scheduled task: ${task.name}] Run this now and report the result to the owner.`;
-  return `${header}\n\n${task.prompt}`.trim();
+  return `${header}\n\n${task.prompt}`.trim() + (runId != null ? completionInstruction(runId) : "");
+}
+
+/**
+ * Record the run, then enqueue its prompt carrying the run id. The run row comes first because the prompt needs its id;
+ * a deduped enqueue (same minute already fired) removes the row again, so a duplicate never leaves an open orphan.
+ */
+function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string): number | undefined {
+  const db = getDb();
+  const completion = cfg.taskCompletion?.enabled !== false;
+  const run = db
+    .prepare(`INSERT INTO task_runs (name, agent, ts, fired_at, expects_completion) VALUES (?, ?, ?, unixepoch(), ?)`)
+    .run(t.name, t.agent, tsSec, completion ? expectsCompletion(t.type) : 0);
+  const runId = Number(run.lastInsertRowid);
+  const id = enqueueInbound({ agentId: t.agent, source: "scheduler", prompt: wrap(t, completion && t.type === "task" ? runId : undefined), dedupKey });
+  if (id == null) {
+    db.prepare(`DELETE FROM task_runs WHERE id = ?`).run(runId);
+    return undefined;
+  }
+  db.prepare(`UPDATE task_runs SET inbound_id = ? WHERE id = ?`).run(id, runId);
+  return id;
+}
+
+/** Alarm the main agent with ONE digest (each run once) about task runs that fired but were never marked complete. */
+export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
+  if (cfg.taskCompletion?.enabled === false || cfg.taskCompletion?.alarm === false) return 0; // shadow mode: instruction + records, no alarm
+  const db = getDb();
+  const nowSec = Math.floor(nowMs / 1000);
+  const rows = findUnfinished(db, nowSec, cfg.taskCompletion?.alarmAfterMin ?? 30, SWEEP_MAX, cfg.taskCompletion?.alarmMaxAgeH ?? 12);
+  if (!rows.length) return 0;
+  sendAgentMessage(cfg.mainAgentId, cfg.mainAgentId, alarmDigest(rows, nowSec)); // one digest, not N messages (bus breakers)
+  for (const r of rows) {
+    markAlarmed(db, r.id, r.delivery);
+    logger.warn({ run: r.id, task: r.name, agent: r.agent, delivery: r.delivery }, "scheduled task fired but never completed");
+  }
+  return rows.length;
 }
 
 /** Fire any tasks due in the current minute (idempotent via inbound dedup key). */
@@ -85,14 +123,8 @@ export function fireDueTasks(cfg: EngineConfig, nowMs: number): number {
   let fired = 0;
   for (const t of tasks) {
     if (!isDueNow(t.schedule, nowMs, cfg.owner.timezone)) continue;
-    const id = enqueueInbound({
-      agentId: t.agent,
-      source: "scheduler",
-      prompt: wrap(t),
-      dedupKey: `sched:${t.name}:${mk}`,
-    });
+    const id = fireOne(cfg, t, Math.floor(nowMs / 1000), `sched:${t.name}:${mk}`);
     if (id != null) {
-      getDb().prepare(`INSERT INTO task_runs (name, agent, ts) VALUES (?, ?, ?)`).run(t.name, t.agent, Math.floor(nowMs / 1000));
       fired++;
       logger.info({ task: t.name, agent: t.agent, type: t.type }, "scheduled task fired");
     }
@@ -115,7 +147,7 @@ function setLastTick(ms: number): void {
  * the single MOST-RECENT occurrence before the current minute; if it landed in the gap (lastTick, now]
  * (bounded to CATCHUP_MAX_MS) AND task_runs shows it did NOT already fire, we fire it once.
  *
- * No-double-fire (Toby's hard requirement): we (a) consult task_runs for that occurrence's minute BEFORE
+ * No-double-fire: we (a) consult task_runs for that occurrence's minute BEFORE
  * firing, and (b) enqueue with the SAME per-minute dedup key the on-time path uses, so an occurrence the
  * normal fire already handled is suppressed by both guards. We fire only the LATEST missed occurrence per
  * task (not a backlog replay) so a frequent task can't flood the fleet after a long outage.
@@ -133,9 +165,8 @@ export function catchUpMissed(cfg: EngineConfig, nowMs: number): number {
     const occSec = Math.floor(occ / 1000);
     const already = db.prepare(`SELECT 1 FROM task_runs WHERE name=? AND ts>=? AND ts<? LIMIT 1`).get(t.name, occSec, occSec + 60);
     if (already) continue; // already fired (on-time or a prior catch-up) -> do NOT re-fire
-    const id = enqueueInbound({ agentId: t.agent, source: "scheduler", prompt: wrap(t), dedupKey: `sched:${t.name}:${minuteKey(occ)}` });
+    const id = fireOne(cfg, t, occSec, `sched:${t.name}:${minuteKey(occ)}`);
     if (id != null) {
-      db.prepare(`INSERT INTO task_runs (name, agent, ts) VALUES (?, ?, ?)`).run(t.name, t.agent, occSec);
       fired++;
       logger.warn({ task: t.name, agent: t.agent, occMin: minuteKey(occ), lateBySec: Math.floor((nowMs - occ) / 1000) }, "catch-up: fired an occurrence missed while the engine was down");
     }
@@ -158,6 +189,7 @@ export function startScheduler(cfg: EngineConfig): () => void {
     if (stopped) return;
     try {
       fireDueTasks(cfg, Date.now());
+      sweepUnfinished(cfg, Date.now());
       setLastTick(Date.now()); // advance the catch-up watermark each live tick
     } catch (err) {
       logger.error({ err }, "scheduler tick error");

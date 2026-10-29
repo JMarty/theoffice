@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly encrypted data backup (03:50 local)
+
+[Timer]
+OnCalendar=*-*-* 03:50:00 @TZ@
+Persistent=true
+
+[Install]
+WantedBy=timers.target

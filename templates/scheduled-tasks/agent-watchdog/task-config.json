@@ -1,0 +1,9 @@
+{
+  "schedule": "6,18,30,42,54 * * * *",
+  "enabled": false,
+  "type": "heartbeat",
+  "skipIfBusy": false,
+  "forceSend": true,
+  "createdAt": 1779809534,
+  "_seeded": "shipped disabled by the office export; enable it once the agent it names exists"
+}

@@ -28,8 +28,9 @@ const MAX_ALWAYS = 200; // candidate cap on hot+warm before the byte budget trim
 /**
  * Share of the budget RESERVED for topical (meaning-matched) memories.
  *
- * Without a reserve, strict hot -> warm -> topical priority starves topical completely: marveen alone
- * has 26 hot + 378 warm memories, ~197,000 chars after the per-entry cap, against a 6,000 char budget.
+ * Without a reserve, strict hot -> warm -> topical priority starves topical completely: a busy agent
+ * can have dozens of hot and hundreds of warm memories (~200,000 chars after the per-entry cap) against a
+ * 6,000 char budget.
  * The fill loop breaks long before it reaches a topical entry, so semantic recall would have been
  * correct code that never once appeared in a preamble. Hot still leads; warm yields the slice.
  */
@@ -44,11 +45,10 @@ const WARM_RESERVE_FRACTION = 0.3;
 /**
  * Memories at or above this salience are CORE: loaded on every wake before anything else competes.
  *
- * CURRENTLY UNUSED BY OWNER DECISION (2026-08-03). I built this to preload key facts; the owner said he
- * does not want preloading — "the agent doesn't have to know it in advance, but if something new comes
- * up they should check if there is already a memory about it." So nothing is promoted to core, and the
- * budget goes to recall + search instead. The mechanism stays because it is tested and reversible with
- * a single UPDATE, but do NOT promote memories here without him asking for it.
+ * CURRENTLY UNUSED BY DESIGN. Design rule: agents should not preload facts they do not need; when something
+ * new comes up they check whether a memory about it already exists (recall + search). So nothing is promoted
+ * to core and the budget goes to recall and search instead. The mechanism stays because it is tested and
+ * reversible with a single UPDATE, but do NOT promote memories here without an explicit request.
  */
 const CORE_SALIENCE = 5;
 const CORE_RESERVE_FRACTION = 0.25;

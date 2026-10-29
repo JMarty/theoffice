@@ -2,13 +2,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { cosineSimilarity, encodeEmbedding, decodeEmbedding, generateEmbedding, EXPECTED_DIM } from "./embeddings.js";
 
 /**
- * Memory vectors, added 2026-08-03.
+ * Memory vectors.
  *
- * Context: the `embedding` column has existed since ClaudeClaw, but The Office runtime never wrote to
- * it. The last memory to get a vector was 2026-06-09, the day of the migration; the 2,375 saved since
- * have none, and the 647 that do are orphans imported from the old system. Recall still worked because
- * it runs on FTS keywords, so nothing looked broken — it just could not match by MEANING ("the flat"
- * never finds a memory that only says "the Baker Street unit").
+ * Context: the `embedding` column can stay empty while recall still works on FTS keywords, so nothing
+ * looks broken, yet recall cannot match by MEANING ("the office" never finds a memory that only says
+ * "the Main Street unit").
  *
  * The load-bearing rule here: EMBEDDING FAILURE MUST NEVER COST A MEMORY. Ollama is a local service
  * that can be down, slow, or mid-restart. Saving the memory is the thing that matters; the vector is an
@@ -36,7 +34,7 @@ describe("cosineSimilarity", () => {
   });
 
   it("mismatched lengths -> 0, never a throw or a NaN", () => {
-    // A model change would silently alter the dimension. Ranking must degrade, not crash the recall path.
+    // A model change can silently alter the dimension. Ranking must degrade, not crash the recall path.
     expect(cosineSimilarity([1, 2, 3], [1, 2])).toBe(0);
   });
 
@@ -53,8 +51,8 @@ describe("encode / decode", () => {
   });
 
   it("decodes junk to null instead of throwing", () => {
-    // The column is TEXT and holds rows written by the OLD system. A single bad row must not take
-    // down a search over 3,000 memories.
+    // The column is TEXT and may hold rows written by older code. A single bad row must not take
+    // down a search over thousands of memories.
     expect(decodeEmbedding(null)).toBeNull();
     expect(decodeEmbedding("")).toBeNull();
     expect(decodeEmbedding("not json")).toBeNull();
@@ -92,13 +90,12 @@ describe("generateEmbedding — degrades, never throws", () => {
     expect(f).not.toHaveBeenCalled();
   });
 
-  it("REJECTS a wrong-dimension vector instead of banking a dead one (Toby, 2026-08-03)", async () => {
-    // The nastiest failure this module can have. A half-loaded or momentarily-wrong Ollama model
-    // returns a short vector; stored, it reads cosine 0 against every real full-length vector, so it is
-    // SEMANTICALLY DEAD. Worse, it is not null, so countEmbeddings scores the row as covered and the
-    // backfill (WHERE embedding IS NULL) never retries it. A transient glitch would permanently poison
-    // rows while the very counter built to catch silent gaps reported them done. Rejecting keeps the
-    // row NULL, which is honest and self-healing: the next backfill pass picks it up.
+  it("REJECTS a wrong-dimension vector instead of banking a dead one", async () => {
+    // A half-loaded or momentarily-wrong Ollama model returns a short vector; stored, it reads cosine 0
+    // against every full-length vector, so it is SEMANTICALLY DEAD. Worse, it is not null, so
+    // countEmbeddings scores the row as covered and the backfill (WHERE embedding IS NULL) never retries
+    // it. Rejecting keeps the row NULL, which is honest and self-healing: the next backfill pass picks
+    // it up.
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ embedding: [1, 2, 3] }) })));
     expect(await generateEmbedding("short vector from a broken model")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ embedding: Array(767).fill(0.1) }) })));
@@ -120,22 +117,14 @@ describe("generateEmbedding — degrades, never throws", () => {
 });
 
 /**
- * 2026-08-04 incident: 41 memories saved with no vector across ~1h45m, silently.
- *
- * Root cause was a CAPACITY interaction, not a bug in any one place. bge-m3 is 1.14GB against
- * nomic's 274MB, and OLLAMA_KEEP_ALIVE=5m unloads it between sporadic saves — so a save that lands
- * on a cold model pays a full model load. Measured on this box the same call took 3.9s, 7.0s and
- * 30.3s within one minute. The 20s timeout was chosen for a warm 274MB model ("~1.4s per document
- * warm"), and a cold 1.14GB load simply does not fit inside it.
- *
- * It failed SILENTLY because the save path is deliberately fire-and-forget: generateEmbedding
- * returns null on timeout, the row keeps its NULL, and nothing retries or alarms. That is the right
- * trade for a save (the memory is the asset, the vector is an enhancement) but it means the timeout
- * must be generous enough that the normal case fits. Recall is unaffected either way — it races on
- * its own RECALL_EMBED_TIMEOUT_MS (2.5s) and never waits on this one.
+ * The save path is deliberately fire-and-forget: generateEmbedding returns null on timeout, the row
+ * keeps its NULL, and nothing retries or alarms. That is the right trade for a save (the memory is the
+ * asset, the vector is an enhancement) but it means the timeout must be generous enough that a cold
+ * model load fits. Recall is unaffected either way: it races on its own RECALL_EMBED_TIMEOUT_MS and
+ * never waits on this one.
  */
 describe("EMBED_TIMEOUT_MS — must tolerate a cold model load", () => {
-  it("defaults high enough for a cold 1.14GB load (measured worst case 30.3s)", async () => {
+  it("defaults high enough for a cold model load", async () => {
     vi.resetModules();
     delete process.env.EMBED_TIMEOUT_MS;
     const m = await import("./embeddings.js?fresh-default");

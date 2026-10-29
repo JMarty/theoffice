@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the daily semantic-memory vectorize at 04:00 @TZ@ (before the 05:00 dream+briefing)
+
+[Timer]
+# Box clock is UTC, so pin the zone explicitly (systemd >=240). e.g. 04:00 local differs from UTC by the zone offset
+# or 03:00 UTC (winter/CET); systemd handles the DST shift. Runs pre-dream so consumers never see NULLs.
+OnCalendar=*-*-* 04:00:00 @TZ@
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -3,12 +3,12 @@
   "cases": [
     {
       "name": "clean slack reply",
-      "reply": "*Erste is short.* You need 356k in before the 15th.\n\n• current balance 206,785\n• the floor is 200,000\n\nSay go and I move it.",
+      "reply": "*Bank A is short.* You need 80k in before the 15th.\n\n• current balance 120,000\n• the floor is 200,000\n\nSay go and I move it.",
       "violations": []
     },
     {
       "name": "markdown bold instead of slack bold",
-      "reply": "**Erste is short.** You need 356k before the 15th.",
+      "reply": "**Bank A is short.** You need 80k before the 15th.",
       "violations": ["noDoubleAsteriskBold"]
     },
     {
@@ -28,12 +28,12 @@
     },
     {
       "name": "markdown table",
-      "reply": "| account | balance |\n| --- | --- |\n| Erste | 206785 |",
+      "reply": "| account | balance |\n| --- | --- |\n| Bank A | 120000 |",
       "violations": ["noMarkdownTables"]
     },
     {
       "name": "ai cliche opener",
-      "reply": "Certainly! I have checked the balance and it is 206,785.",
+      "reply": "Certainly! I have checked the balance and it is 120,000.",
       "violations": ["noAiCliche"]
     },
     {

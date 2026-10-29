@@ -67,7 +67,7 @@ Server-side data only; both UIs read it through `/api/runtimes`.
   this account lists it (`Fable — Fable 5 · Most capable for your hardest and longest-running
   tasks`), so that assumption was wrong here. It is the most expensive tier — roughly double Opus 5
   per token — so it belongs in the list as an option, not as anyone's default.
-- `claude-opus-4-8` stays: `home` and `zeus` currently run on it. Note the `/model` menu no longer
+- `claude-opus-4-8` stays: `home` and `agent-a` currently run on it. Note the `/model` menu no longer
   lists 4.8, but the menu itself says *"For other/previous model names, specify with `--model`"* —
   and `--model` is exactly how the engine launches agents, so those two keep working.
 - `claude-haiku-4-5-20251001` → `claude-haiku-4-5` (the dated ID is a snapshot, the alias is what
@@ -86,7 +86,7 @@ claude-sonnet-4-6, claude-opus-4-6-thinking, gpt-oss-120b-medium
 The whole list is taken, because the field is documented as "exactly as `agy models` advertises
 them" — and a 3.6 series now exists that the code does not know about.
 
-**Live-data consequence:** `argus/agent.json` currently holds `"Gemini 3.1 Pro (High)"`, which is
+**Live-data consequence:** `agent-b/agent.json` currently holds `"Gemini 3.1 Pro (High)"`, which is
 not in that list. It has been running without visible error, which strongly suggests `agy` silently
 falls back to the account default on an unknown name. Migrating it to `gemini-3.1-pro-high` is
 tenant data, so it is called out separately and needs the owner's explicit go-ahead — it is not part
@@ -140,7 +140,7 @@ No new command syntax. A new `office-tune` script, modelled directly on `office-
 engine API with the dashboard token). The agent's `CLAUDE.md` documents it:
 
 ```
-Owner  →  "Hestia, állítsd magad xhigh effortra"
+Owner  →  "Agent, set yourself to xhigh effort"
 Agent  →  office-tune effort xhigh
 Agent  →  office-say "⚙️ effort: high → xhigh — applies after the current turn"
 ```
@@ -177,7 +177,7 @@ which warns the agent off owner-only actions.
   Unchanged, per earlier decision.
 - Interrupting a busy agent to switch immediately. The owner chose wait-then-switch; the Escape-based
   variant belongs with the open "STOP cannot interrupt" bug.
-- Migrating `argus/agent.json` off the stale Gemini label — flagged above, owner's call.
+- Migrating `agent-b/agent.json` off the stale Gemini label — flagged above, owner's call.
 
 ## Test plan
 

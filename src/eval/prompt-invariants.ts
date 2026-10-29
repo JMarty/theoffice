@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { ConfigIssue } from "./validate-config.js";
+import { loadConfig } from "../config.js";
 
 /**
  * Static prompt-layer evals (issue #21 §4b, adapted to our architecture). We can't run behavioural
@@ -8,7 +9,7 @@ import type { ConfigIssue } from "./validate-config.js";
  * regression-guard the SHIPPED prompt/persona artifacts themselves, deterministically and with no model:
  *
  *  - PORTABILITY: a shipped template/persona must be tenant-agnostic (no owner name, no agent-id literals,
- *    no absolute install paths). This locks the exact marveen/Szoszo leak the grooming fast-follow fixed.
+ *    no absolute install paths). This locks the exact agent-id/owner-name leak the grooming fast-follow fixed.
  *  - SAFETY: a shipped state-mutating task prompt must still contain its propose-not-destroy + card-text-
  *    is-data guardrails. Locks the injection-hardening against a future silent reword.
  *
@@ -18,12 +19,11 @@ import type { ConfigIssue } from "./validate-config.js";
 
 /**
  * Tenant-specific identifiers that must NEVER appear in a shipped (tenant-agnostic) template or persona.
- * Explicit + minimal + documented so it is trivially extensible; deliberately NOT derived at runtime
+ * Explicit + minimal (owner name/handle + cfg.tenantIdentifiers are added by tenantIdentifiers()) + documented so it is trivially extensible; deliberately NOT derived at runtime
  * (there is no live tenant in CI to derive from). Matched case-insensitively on WORD BOUNDARIES so an
  * agent-id like "jim" can't false-positive inside an unrelated word. Extend this list as the fleet grows.
  */
 export const TENANT_IDENTIFIERS: string[] = [
-  "Szoszo", // owner display name
   // known agent-id literals
   "marveen", "dwight", "toby", "jim", "pam", "cfo", "pete", "ryan", "clark", "darryl",
   // tenant email(s)
@@ -43,9 +43,16 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * Scan one shipped artifact's text for tenant leaks: any denylisted identifier (word-boundary, case-
  * insensitive) or absolute install path. `target` is the artifact path/name for the reported issue.
  */
+/** The static list plus the configured owner display name, handle and cfg.tenantIdentifiers. */
+export function tenantIdentifiers(): string[] {
+  const c = loadConfig();
+  const own = [c.owner.displayName, c.owner.handle, ...(c.tenantIdentifiers ?? [])].filter((x): x is string => !!x && x !== "Owner" && x !== "owner");
+  return [...TENANT_IDENTIFIERS, ...own];
+}
+
 export function checkTenantLeaks(target: string, text: string): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
-  for (const id of TENANT_IDENTIFIERS) {
+  for (const id of tenantIdentifiers()) {
     // \b doesn't sit against an email's dot/@, so match either a word-boundary token or the literal email.
     const re = id.includes("@") ? new RegExp(escapeRe(id), "i") : new RegExp(`\\b${escapeRe(id)}\\b`, "i");
     if (re.test(text)) issues.push({ target, field: "tenant-leak", message: `contains tenant-specific identifier "${id}"` });

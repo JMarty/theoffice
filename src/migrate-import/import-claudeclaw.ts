@@ -11,7 +11,7 @@
  *
  * Usage:
  *   tsx src/migrate-import/import-claudeclaw.ts --source /path/claudeclaw.db [--keep-snapshot]
- *   (defaults source to /opt/claude/marveen/marveen/store/claudeclaw.db)
+ *   (--source is required unless OLD_REPO is set; then <OLD_REPO>/store/claudeclaw.db)
  */
 import Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
@@ -95,7 +95,7 @@ function tableExists(db: Database.Database, name: string): boolean {
 }
 
 function main(): void {
-  const source = arg("--source") ?? "/opt/claude/marveen/marveen/store/claudeclaw.db";
+  const source = arg("--source") ?? `${process.env.OLD_REPO ?? "."}/store/claudeclaw.db`;
   if (!existsSync(source)) throw new Error(`source DB not found: ${source}`);
 
   const cfg = loadConfig();

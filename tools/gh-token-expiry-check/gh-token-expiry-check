@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# gh-token-expiry-check -- warn BEFORE a fine-grained GitHub PAT used by a git credential helper lapses.
+#
+# Never prints the token. Read-only API call. Exit 0 ok, 1 warn, 2 expired/unreadable.
+# Env: GH_CRED_FILE (git-credentials file holding https://user:TOKEN@github.com), WARN_DAYS (default 7),
+#      NOTIFY=<agent id> (bus message on WARN; needs OFFICE_TENANT_ROOT), DRY_RUN=1, STATE (repeat counter file).
+set -uo pipefail
+CRED="${GH_CRED_FILE:-$HOME/.config/gh-credentials/git-credentials}"
+STATE="${STATE:-$(dirname "$CRED")/.gh-token-expiry-state}"
+WARN_DAYS="${WARN_DAYS:-7}"
+
+[ -r "$CRED" ] || { echo "gh-token-expiry-check: cannot read $CRED"; exit 2; }
+tok="$(sed -nE 's#.*https://[^:/@]+:([^@/]+)@.*#\1#p' "$CRED" | head -1)"
+[ -n "$tok" ] || { echo "gh-token-expiry-check: no token found in $CRED"; exit 2; }
+
+# Fingerprint (first 8 hex of the sha256) only, so a rotation is visible without ever storing the token.
+tok_sha8="$(printf '%s' "$tok" | sha256sum | cut -c1-8)"
+prev_sha8=""; [ -r "$STATE" ] && prev_sha8="$(sed -n 3p "$STATE" 2>/dev/null || true)"
+if [ -n "$prev_sha8" ] && [ "$prev_sha8" != "$tok_sha8" ]; then
+  echo "gh-token-expiry-check: TOKEN CHANGED -- fingerprint ${prev_sha8} -> ${tok_sha8} (rotation or replacement)"
+elif [ -n "$prev_sha8" ]; then
+  echo "gh-token-expiry-check: token unchanged (fingerprint ${tok_sha8})"
+else
+  echo "gh-token-expiry-check: first fingerprint recorded (${tok_sha8})"
+fi
+# State file: line 1 = notice count, line 2 = date of the first notice, line 3 = fingerprint. A new token resets the count.
+_sn=0; _sf=""
+if [ -r "$STATE" ] && [ "$prev_sha8" = "$tok_sha8" ]; then _sn="$(sed -n 1p "$STATE" 2>/dev/null || echo 0)"; _sf="$(sed -n 2p "$STATE" 2>/dev/null || echo "")"; fi
+case "$_sn" in ''|*[!0-9]*) _sn=0;; esac
+printf '%s\n%s\n%s\n' "$_sn" "$_sf" "$tok_sha8" > "$STATE" 2>/dev/null; chmod 600 "$STATE" 2>/dev/null
+
+hdrs="$(curl -sS -D- -o /dev/null -m 20 -H "Authorization: Bearer $tok" https://api.github.com/user 2>&1)"
+rc=$?; unset tok
+[ $rc -eq 0 ] || { echo "gh-token-expiry-check: API call failed (rc=$rc)"; exit 2; }
+
+code="$(printf '%s' "$hdrs" | sed -n '1s#.*[[:space:]]\([0-9][0-9][0-9]\)[[:space:]].*#\1#p')"
+[ "$code" = "200" ] || { echo "gh-token-expiry-check: token did NOT authenticate (HTTP $code) -- already dead or revoked"; exit 2; }
+
+exp="$(printf '%s' "$hdrs" | grep -i 'github-authentication-token-expiration' | tr -d '\r' | sed 's/^[^:]*: *//')"
+if [ -z "$exp" ]; then
+  echo "gh-token-expiry-check: WARN -- token has NO expiration header (classic PAT shape)"; exit 1
+fi
+now=$(date -u +%s); then_=$(date -u -d "${exp% UTC}" +%s 2>/dev/null || echo 0)
+[ "$then_" -gt 0 ] || { echo "gh-token-expiry-check: cannot parse expiry '$exp'"; exit 2; }
+days=$(( (then_ - now) / 86400 ))
+
+if [ "$days" -lt 0 ]; then echo "gh-token-expiry-check: EXPIRED ($exp)"; exit 2; fi
+if [ "$days" -gt "$WARN_DAYS" ]; then echo "gh-token-expiry-check: ok -- ${days} days left ($exp)"; exit 0; fi
+
+echo "gh-token-expiry-check: WARN -- token expires in ${days} day(s) ($exp). Mint a replacement into $CRED before that date."
+if [ -n "${DRY_RUN:-}" ]; then
+  echo "  [DRY_RUN] would notify ${NOTIFY:-<unset>}"
+elif [ -n "${NOTIFY:-}" ] && [ ! -r "${OFFICE_TENANT_ROOT:-}/store/.dashboard-token" ]; then
+  echo "gh-token-expiry-check: NOTIFY requested but OFFICE_TENANT_ROOT/store/.dashboard-token is unreadable; the finding is logged and UNSENT." >&2
+elif [ -n "${NOTIFY:-}" ]; then
+  n=$((_sn + 1)); today=$(date +%Y-%m-%d); [ -n "$_sf" ] || _sf="$today"
+  printf '%s\n%s\n%s\n' "$n" "$_sf" "$tok_sha8" > "$STATE" 2>/dev/null; chmod 600 "$STATE" 2>/dev/null
+  if [ "$n" -eq 1 ]; then seq="FIRST notice"; else seq="notice ${n}, first sent ${_sf}"; fi
+  body="[${seq}] GitHub credential-helper PAT expires in ${days} day(s) (${exp}). Anything that authenticates through $(basename "$CRED") breaks when it lapses."
+  printf '%s' "$body" | python3 -c '
+import json,sys,os,urllib.request
+b=sys.stdin.read()
+tok=open(os.environ["OFFICE_TENANT_ROOT"]+"/store/.dashboard-token").read().strip()
+d=json.dumps({"from":os.environ.get("NOTIFY_FROM","infra"),"to":os.environ["NOTIFY"],"content":b}).encode()
+r=urllib.request.Request("http://127.0.0.1:3430/api/messages",data=d,method="POST",headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json"})
+try: print("  notified %s (bus id %s)" % (os.environ["NOTIFY"], json.load(urllib.request.urlopen(r)).get("id")))
+except Exception as e: print("  NOTIFY FAILED: %s -- the finding is logged but unread" % e)
+' || echo "  NOTIFY FAILED (python) -- the finding is logged but unread"
+fi
+exit 1

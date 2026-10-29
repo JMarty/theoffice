@@ -1,0 +1,7 @@
+[Unit]
+Description=owner-ack-guard — fast (~60-90s) catch for the terminal-vs-office-say gap on owner messages; nudges the agent directly and dedups the slower drift-detector + owner-watchdog via owner_alarmed_at
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 @ROOT@/tools/owner-ack-guard/owner_ack_guard.py --verbose

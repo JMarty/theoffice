@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EngineConfig } from "../types.js";
 import { openDb, closeDb, getDb } from "../db/index.js";
 import { listQueued } from "../queue/index.js";
-import { fireDueTasks, catchUpMissed } from "./index.js";
+import { fireDueTasks, catchUpMissed, sweepUnfinished } from "./index.js";
 import { lastOccurrenceBefore } from "./cron.js";
 
 let root: string;
@@ -45,7 +45,7 @@ beforeAll(() => {
     },
     web: { host: "127.0.0.1", port: 3430 },
     tmux: { socket: "test" },
-    owner: { displayName: "Owner", locale: "en", timezone: "Europe/Budapest" },
+    owner: { displayName: "Owner", locale: "en", timezone: "Europe/Paris" },
     channel: { provider: "none" },
   };
 });
@@ -102,10 +102,10 @@ describe("catchUpMissed (#16 — fire occurrences missed while the engine was do
   });
 
   it("6h CUTOFF: a daily task whose last occurrence is ~11h ago is NOT caught up (proves the bound)", () => {
-    // T = 14:00 Budapest; the daily 03:00 Budapest job last ran 11h ago — beyond the 6h window. Even though
+    // T = 14:00 Paris; the daily 03:00 Paris job last ran 11h ago — beyond the 6h window. Even though
     // it falls after lastTick (engine was down 30h), it must NOT be caught up. The shipped every-minute test
     // only asserted <=1; this proves the cutoff specifically against a real daily schedule.
-    const T = Date.parse("2026-06-22T12:00:00Z"); // 14:00 Europe/Budapest
+    const T = Date.parse("2026-06-22T12:00:00Z"); // 14:00 Europe/Paris
     setLastTick(T - 30 * 60 * 60 * 1000); // 30h ago, so the daily occurrence IS after lastTick...
     const before = runsFor("daily-3am");
     catchUpMissed(cfg, T);
@@ -127,4 +127,64 @@ describe("catchUpMissed (#16 — fire occurrences missed while the engine was do
     catchUpMissed(cfg, T);
     expect(runsFor("every-minute")).toBe(b + 1); // occ (T-1m) > since (T-2m) -> fired exactly once
   });
+});
+
+describe("task completion wiring", () => {
+  const setLastTick = (ms: number) =>
+    getDb().prepare(`INSERT INTO scheduler_state (k, v) VALUES ('last_tick', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(ms);
+  it("catch-up: a run fired now for a 3h-old occurrence is NOT alarmed until alarmAfterMin after the FIRE (blocker: ageing from the occurrence alarmed it at once)", () => {
+    const T = Date.parse("2026-06-22T04:00:00Z"); // owner tz is Paris: the 03:00 occurrence was 01:00Z, 3 h ago
+    setLastTick(T - 5 * 3600_000);
+    expect(catchUpMissed(cfg, T)).toBeGreaterThan(0);
+    const row = getDb().prepare(`SELECT ts, fired_at FROM task_runs WHERE name='daily-3am' ORDER BY id DESC LIMIT 1`).get() as { ts: number; fired_at: number };
+    expect(row.fired_at).toBeGreaterThan(row.ts + 3 * 3600 - 60); // occurrence time is hours older than the real fire time
+    const msgs = () => (getDb().prepare(`SELECT COUNT(*) AS n FROM agent_messages`).get() as { n: number }).n;
+    const before = msgs();
+    expect(sweepUnfinished(cfg, Date.now() + 60_000)).toBe(0); // one minute after firing: nothing
+    expect(msgs()).toBe(before);
+  });
+
+  it("a due sweep sends ONE digest message for several runs, and shadow mode (alarm:false) sends none", () => {
+    const db = getDb();
+    db.prepare(`DELETE FROM task_runs`).run();
+    const old = Math.floor(Date.now() / 1000) - 3600;
+    for (const n of ["a", "b", "c"]) db.prepare(`INSERT INTO task_runs (name, agent, ts, fired_at, expects_completion) VALUES (?, 'main', ?, ?, 1)`).run(n, old, old);
+    const msgs = () => (db.prepare(`SELECT COUNT(*) AS n FROM agent_messages`).get() as { n: number }).n;
+    const before = msgs();
+    expect(sweepUnfinished({ ...cfg, taskCompletion: { alarm: false } }, Date.now())).toBe(0);
+    expect(msgs()).toBe(before);
+    expect(sweepUnfinished(cfg, Date.now())).toBe(3);
+    expect(msgs()).toBe(before + 1);
+    expect(sweepUnfinished(cfg, Date.now())).toBe(0); // each run alarms once
+  });
+
+  it("heartbeat runs get no run id in the prompt and never expect completion", () => {
+    const tdir = join(root, "scheduled-tasks-hb");
+    mkdirSync(join(tdir, "hb"), { recursive: true });
+    writeFileSync(join(tdir, "hb", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "hbagent", type: "heartbeat", prompt: "silent check" }));
+    const hbCfg = { ...cfg, paths: { ...cfg.paths, scheduledTasksDir: tdir } };
+    expect(fireDueTasks(hbCfg, Date.parse("2026-06-23T10:00:00Z"))).toBe(1);
+    const run = getDb().prepare(`SELECT inbound_id, expects_completion FROM task_runs WHERE name='hb'`).get() as { inbound_id: number; expects_completion: number };
+    expect(run.expects_completion).toBe(0);
+    const q = listQueued("hbagent").find((x) => x.id === run.inbound_id);
+    expect(q?.prompt).toContain("silent check");
+    expect(q?.prompt).not.toContain("/api/task-runs/");
+  });
+
+  const now = Date.parse("2026-06-10T07:00:00Z");
+
+  it("injects the run id and the completion instruction into the fired prompt, and links the run to its queue row", () => {
+    fireDueTasks(cfg, now);
+    const run = getDb().prepare(`SELECT id, inbound_id, expects_completion FROM task_runs ORDER BY id DESC LIMIT 1`).get() as { id: number; inbound_id: number; expects_completion: number };
+    expect(run.expects_completion).toBe(1);
+    const q = listQueued("main").find((x) => x.id === run.inbound_id);
+    expect(q?.prompt).toContain(`/api/task-runs/${run.id}/complete`);
+  });
+
+  it("a deduped fire leaves NO orphan run row", () => {
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n;
+    fireDueTasks(cfg, now); // same minute again
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n).toBe(before);
+  });
+
 });

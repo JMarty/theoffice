@@ -100,6 +100,22 @@ describe("readCredentialState", () => {
   });
 });
 
+describe("paneLooksStale401 (post-reauth fallback)", () => {
+  const SEP = "─".repeat(40);
+  const FOOTER = "  bypass permissions on (shift+tab to cycle)";
+  const err = ["API Error: 401", "Invalid authentication " + "credentials"].join(" · ");
+  it("an idle pane whose tail shows the 401 is signed out", () => {
+    expect(paneLooksSignedOut(["● " + err, SEP, "❯ ", SEP, FOOTER].join("\n"))).toBe(true);
+  });
+  it("a pane that is mid-turn (no idle footer) is never judged by it", () => {
+    expect(paneLooksSignedOut(["● " + err, "✻ Working…"].join("\n"))).toBe(false);
+  });
+  it("the text quoted far up the scrollback of an idle pane does not count", () => {
+    const filler = Array.from({ length: 30 }, (_, i) => "line " + i);
+    expect(paneLooksSignedOut(["● " + err, ...filler, SEP, "❯ ", SEP, FOOTER].join("\n"))).toBe(false);
+  });
+});
+
 describe("paneLooksSignedOut", () => {
   // Banners are assembled from parts so this file never contains a rendered one: a literal here
   // would make `grep`, a code review, or a failing-test dump arm the reader's own pane.
@@ -136,11 +152,11 @@ describe("trackBusySkips", () => {
   it("escalates once the same agent has been skipped N ticks in a row", () => {
     let map = new Map<string, number>();
     for (let i = 1; i < 3; i++) {
-      const r = trackBusySkips(["zeus"], map, 3);
+      const r = trackBusySkips(["agent-a"], map, 3);
       map = r.next;
       expect(r.escalate).toEqual([]);
     }
-    expect(trackBusySkips(["zeus"], map, 3).escalate).toEqual(["zeus"]);
+    expect(trackBusySkips(["agent-a"], map, 3).escalate).toEqual(["agent-a"]);
   });
 
   // The reason the counter is per agent and not per candidate set: a set-wide counter is reset by
@@ -150,18 +166,18 @@ describe("trackBusySkips", () => {
     let map = new Map<string, number>();
     let escalate: string[] = [];
     for (let tick = 0; tick < 3; tick++) {
-      const skipped = tick % 2 === 0 ? ["zeus", "argus"] : ["zeus"];
+      const skipped = tick % 2 === 0 ? ["agent-a", "agent-b"] : ["agent-a"];
       const r = trackBusySkips(skipped, map, 3);
       map = r.next;
       escalate = r.escalate;
     }
-    expect(escalate).toEqual(["zeus"]);
+    expect(escalate).toEqual(["agent-a"]);
   });
 
   it("forgets an agent as soon as it stops being skipped", () => {
-    const first = trackBusySkips(["zeus"], new Map(), 3);
+    const first = trackBusySkips(["agent-a"], new Map(), 3);
     expect(trackBusySkips([], first.next, 3).next.size).toBe(0);
-    expect(trackBusySkips(["zeus"], new Map(), 3).next.get("zeus")).toBe(1);
+    expect(trackBusySkips(["agent-a"], new Map(), 3).next.get("agent-a")).toBe(1);
   });
 });
 
@@ -218,9 +234,9 @@ describe("restartTargets", () => {
   // destroys that conversation, and the banner match that triggered it is usually the agent
   // merely PRINTING a marker (reviewing this file, quoting an API error) rather than signed out.
   it("never restarts a signed-out agent whose pane is busy", () => {
-    const r = restartTargets([state({ id: "zeus", signedOut: true, busy: true })]);
+    const r = restartTargets([state({ id: "agent-a", signedOut: true, busy: true })]);
     expect(r.restart).toEqual([]);
-    expect(r.skippedBusy).toEqual(["zeus"]);
+    expect(r.skippedBusy).toEqual(["agent-a"]);
   });
 });
 

@@ -1,0 +1,23 @@
+# oomwatch — push-only cgroup OOM-kill detector (Darryl, 2026-08-03).
+# Replaces the memory-pressure sampler that missed the 08-03 kill (it sampled a gauge every
+# 10min; this blocks on poll() against the memory.events monotonic oom_kill counter = event-
+# driven, cannot miss). FLEET RULE 1 compliant: no foreground poll loop; on a kill it POSTs to
+# the bus to wake darryl for triage.
+# Install:  systemctl --user daemon-reload && systemctl --user enable --now oomwatch.service
+# Rollback: systemctl --user disable --now oomwatch.service   (zero engine side effects)
+[Unit]
+Description=oomwatch — push-only cgroup OOM-kill detector (event-driven; replaces the RAM sampler)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=OFFICE_TENANT_ROOT=@TENANT@
+ExecStart=/usr/bin/python3 @ROOT@/tools/oomwatch/oomwatch.py
+Restart=always
+RestartSec=5
+# Tiny stdlib process — footprint is the point. Must not itself become a memory offender.
+MemoryHigh=32M
+MemoryMax=64M
+
+[Install]
+WantedBy=default.target

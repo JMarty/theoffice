@@ -1,3 +1,4 @@
+import { completeRun, OUTCOMES } from "../scheduler/completion.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -35,7 +36,7 @@ import { normalizeEffort } from "../session/effort.js";
 
 // Live context fill % from the agent's most-recent Claude Code session transcript — reads the
 // last turn's token usage (input + cache) against the context window. Token-free (no /context
-// call). Window = 1M, matching Claude Code's own /context readout (verified on cfo + marveen).
+// call). Window = 1M, matching Claude Code's own /context readout.
 // null if unreadable.
 const CONTEXT_WINDOW = 1000000;
 function contextPctFromTranscript(agentDir: string): number | null {
@@ -100,7 +101,7 @@ const logger = log("web");
 const HERE = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = join(HERE, "..", "..", "web-ui");
 const BOOT_MS = Date.now(); // for the "since restart" usage window
-// Soft ceiling for codex agents: the codex runtime shares the owner's single ChatGPT (Plus) usage cap,
+// Soft ceiling for codex agents: the codex runtime shares the owner's single ChatGPT (consumer plan) usage cap,
 // so more than this many concurrent codex agents will hit the rolling 5h limit and stall. UI warns past it.
 const MAX_CODEX_AGENTS = 2;
 
@@ -417,6 +418,8 @@ async function handleApi(
       runtime: "Node · container",
       port: cfg.web.port,
       dashboard: cfg.web.dashboard ?? "classic",
+      ownerHandle: cfg.owner.handle ?? "owner",
+      ownerName: cfg.owner.displayName,
     });
   }
   // POST /api/update/apply {discard?} — pull + build + restart (engine bounces after the response).
@@ -509,7 +512,7 @@ async function handleApi(
     const raw = await readBody(req, res); if (raw === null) return;
     const b = parseJson(raw);
     if (!b?.agentId || !b?.content) return json(res, 400, { error: "agentId and content required" });
-    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Budapest" });
+    const date = b.date ?? new Date().toLocaleDateString("en-CA", { timeZone: cfg.owner.timezone });
     const r = db.prepare(`INSERT INTO daily_logs (agent_id, date, content) VALUES (?, ?, ?)`).run(b.agentId, date, b.content);
     return json(res, 200, { id: Number(r.lastInsertRowid) });
   }
@@ -556,7 +559,7 @@ async function handleApi(
     }
     const r = upsertSection({ section_key: b.section_key, agent: b.agent, content: b.content, as_of: b.as_of, max_age_sec: b.max_age_sec, status: b.status });
     if (!r.ok) {
-      // LOG THE REFUSAL (dwight, 2026-09-22). A refused board write used to leave NO trace anywhere, four ways
+      // LOG THE REFUSAL. A refused board write used to leave NO trace anywhere, four ways
       // over: this handler did not log it, four of six writers catch the exception into a WARN nobody reads, and
       // briefing_board has section_key as PRIMARY KEY so the next post overwrites the row with no history table.
       // That makes both failure directions unmeasurable: a health leak is invisible once overwritten, and a
@@ -630,6 +633,17 @@ async function handleApi(
     return json(res, 200, { ok: true, id: b.id });
   }
 
+  // POST /api/task-runs/:id/complete {outcome, note?} — the agent closes a scheduled-task run (first completion wins)
+  const tr = path.match(/^\/api\/task-runs\/(\d+)\/complete$/);
+  if (tr && m === "POST") {
+    const raw = await readBody(req, res); if (raw === null) return;
+    const b = parseJson(raw) ?? {};
+    const r = completeRun(db, Number(tr[1]), String(b.outcome ?? "done"), typeof b.note === "string" ? b.note : undefined);
+    if (r === "missing") return json(res, 404, { error: "run not found", id: Number(tr[1]) });
+    if (r === "bad_outcome") return json(res, 400, { error: `outcome must be one of: ${OUTCOMES.join(", ")}` });
+    return json(res, 200, { ok: true, id: Number(tr[1]), already: r === "already" });
+  }
+
   // POST /api/outbound {agent, channel, text} — agent reply path (-> outbound_queue -> Slack)
   if (path === "/api/outbound" && m === "POST") {
     const raw = await readBody(req, res); if (raw === null) return;
@@ -684,9 +698,9 @@ async function handleApi(
     if (action === "cleanreset") {
       // Fire-and-forget the handoff+reset+summary orchestrator (background python).
       // It tells the agent to write HANDOFF.md, waits, restarts it via this same API,
-      // then tells it to re-read the handoff and office-say Szoszo a summary.
+      // then tells it to re-read the handoff and office-say the owner a summary.
       try {
-        spawn("python3", ["/opt/claude/theoffice/tenant/agents/darryl/tools/clean-reset/clean_reset.py", id],
+        spawn("python3", [cfg.cleanResetScript ?? join(cfg.paths.tenantRoot, "tools", "clean-reset", "clean_reset.py"), id],
           { detached: true, stdio: "ignore" }).unref();
       } catch { /* best-effort */ }
       return json(res, 200, { ok: true, action, note: "handoff + reset started; Slack summary in a few minutes" });
@@ -725,13 +739,13 @@ async function handleApi(
         else delete meta.model;
       }
       writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-      // GUARDRAIL (ChatGPT Plus, no Pro): the codex runtime shares the owner's single ChatGPT usage cap,
+      // GUARDRAIL (consumer ChatGPT plan): the codex runtime shares the owner's single ChatGPT usage cap,
       // so >2 concurrent codex agents will hit the 5h limit and stall the fleet. Soft-warn (never block) so
       // the switch can't trap the owner — just surfaces the risk in the UI when the ceiling is crossed.
       const codexCount = loadAgents(cfg).filter((a) => a.runtime === "codex").length;
       const warning =
         rv === "codex" && codexCount > MAX_CODEX_AGENTS
-          ? `${codexCount} agents now on codex. ChatGPT Plus shares one usage cap — >${MAX_CODEX_AGENTS} concurrent codex agents will hit the 5h limit and stall. Consider keeping it to ${MAX_CODEX_AGENTS}.`
+          ? `${codexCount} agents now on codex. A consumer ChatGPT plan shares one usage cap — >${MAX_CODEX_AGENTS} concurrent codex agents will hit the 5h limit and stall. Consider keeping it to ${MAX_CODEX_AGENTS}.`
           : undefined;
       killSession(cfg.tmux.socket, session); // restart so the new runtime path takes effect
       relaunch();
@@ -815,7 +829,7 @@ async function handleApi(
     return json(res, 200, { ok: true, id, category: b.category });
   }
 
-  // ==================== Owner Board (spec: tenant/agents/marveen/OWNER-BOARD-SPEC.md v1.1) ====================
+  // ==================== Owner Board (owner board spec v1.1) ====================
   // Fully separate from kanban_cards/kanban routes by design (hard constraint) — own table, own endpoints.
 
   // POST /api/owner-cards — create a card
@@ -843,7 +857,7 @@ async function handleApi(
     return json(res, 200, found);
   }
 
-  // POST /api/owner-cards/<id>/comments — owner: {author:'szoszo',text,tray} · agent: {author,text,needs_you?}
+  // POST /api/owner-cards/<id>/comments — owner: {author:<cfg.owner.handle>,text,tray} · agent: {author,text,needs_you?}
   const ocComment = path.match(/^\/api\/owner-cards\/([^/]+)\/comments$/);
   if (ocComment && m === "POST") {
     const raw = await readBody(req, res); if (raw === null) return;

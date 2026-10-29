@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the office-say drift detector every ~60s
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

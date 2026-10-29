@@ -24,7 +24,7 @@ export interface AgentDef {
   enabled: boolean;
   /**
    * This agent's OWN Slack identity — a distinct bot the owner can DM directly
-   * ("CFO Charly", "Logistics Lenny"). Each agent = its own Slack app, so:
+   *. Each agent = its own Slack app, so:
    *  - appToken (xapp-…) opens one Socket-Mode connection for THIS app
    *  - botToken (xoxb-…) posts replies AS this agent (its name + avatar)
    *  - botUserId lets us ignore the agent's own echoed messages
@@ -34,8 +34,8 @@ export interface AgentDef {
   /**
    * Slack user ids (besides the owner) allowed to DM this agent. The owner is
    * ALWAYS allowed. If this list is empty AND an owner is configured, the agent
-   * is owner-only (secure by default). Shared agents (e.g. Ryan↔Gergő,
-   * Dwight↔wife) list the external person's id here.
+   * is owner-only (secure by default). Shared agents (e.g. a work agent shared with a colleague,
+   * a home agent shared with a partner) list the external person's id here.
    */
   allowFrom?: string[];
   /** security profile name (drives the connector deny-list); default = full access */
@@ -75,12 +75,22 @@ export interface AgentDef {
 export interface EngineConfig {
   mainAgentId: string;
   paths: PathsConfig;
+  /** optional absolute path of the clean-reset orchestrator; default <tenantRoot>/tools/clean-reset/clean_reset.py */
+  cleanResetScript?: string;
+  /** scheduled-task completion: runs carry an id + completion instruction; unfinished `task` runs alarm the main agent once (heartbeats never) */
+  taskCompletion?: { enabled?: boolean; alarm?: boolean; alarmAfterMin?: number; alarmMaxAgeH?: number };
+  /** briefing-board section keys this tenant accepts (replaces the built-in default list) */
+  briefingSections?: string[];
+  /** extra identifiers the shipped-template leak check must reject (owner nickname, private repo names ...) */
+  tenantIdentifiers?: string[];
+  /** extra health-deny regex fragments for the briefing board (tenant's own medication names etc.) */
+  briefingHealthDenyExtra?: string[];
   web: WebConfig;
   tmux: TmuxConfig;
   owner: OwnerConfig;
   channel: ChannelConfig;
   /**
-   * Optional scoped OCR trigger (rental tenant portal). When set, a bot message in `channelId` carrying
+   * Optional scoped OCR trigger (document portal). When set, a bot message in `channelId` carrying
    * the matching `secret` (and a valid UUID) is the ONLY bot message accepted by the Slack ingest — routed
    * as a data-only re-OCR wake to `agentId`. Unset = the feature is inert and the bot-drop is unchanged.
    */
@@ -94,6 +104,14 @@ export interface OcrSignalConfig {
   secret: string;
   /** the agent woken to run the OCR cross-check for the submission */
   agentId: string;
+  /** wording used in the wake prompts; defaults are generic so the engine carries no tenant specifics */
+  label?: string;
+  /** base URL a generated document is fetched from, e.g. https://portal.example/svc/doc/view/ */
+  viewUrlBase?: string;
+  /** URL where the owner approves a new submission */
+  approveUrl?: string;
+  /** name used for the owner in the heads-up prompt (default "the owner") */
+  ownerName?: string;
 }
 
 export interface PathsConfig {
@@ -142,6 +160,8 @@ export interface TmuxConfig {
 
 export interface OwnerConfig {
   displayName: string;
+  /** stable handle stored as the owner's author/assignee value (default "owner") */
+  handle?: string;
   /** Slack user id of the human owner (replaces the old hardcoded Telegram chat id) */
   slackUserId?: string;
   locale: string;

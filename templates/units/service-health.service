@@ -1,0 +1,5 @@
+[Unit]
+Description=service-health.json producer  — DETECTOR half of the 08-01 monitoring-chain contract; the briefing reads it and asserts fleet health to the owner.
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 @ROOT@/tools/service-health/service_health.py

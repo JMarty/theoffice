@@ -4,11 +4,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * Locks the 2026-08-02 ghost-placeholder outage (kanban cf693128).
  *
  * Claude Code v2.1.220 renders an EMPTY composer as `❯ ` plus a DIM (SGR 2) hint, and since v2.1.x
- * that hint is the agent's own last prompt — `❯ run the morning briefing now` on marveen,
- * `❯ approve the pending travel bookings` on pam. `tmux capture-pane -p` throws styling away, so the
+ * that hint is the agent's own last prompt — e.g. `❯ run the daily report now`. `tmux capture-pane -p` throws styling away, so the
  * pre-send guard saw a clean pane as a parked draft, tried to C-u away text that is chrome (which can
- * never work), and refused the delivery as dirty-pane. 144 refusals across marveen/darryl/dwight/pam
- * in one morning; an owner Slack message (inbound 9913) failed six attempts and never arrived.
+ * never work), and refused the delivery as dirty-pane, repeatedly, so an owner message never arrived.
  *
  * The invariant: DELIVERY MUST SURVIVE THE GHOST HINT, WITHOUT LOOSENING THE RESIDUE GUARD. This file
  * drives the REAL pane-state module against pane bytes captured off the live panes, and mocks only

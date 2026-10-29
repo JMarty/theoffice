@@ -21,7 +21,7 @@ const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf8"));
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "office-trust-"));
-  agentDir = join(home, "tenant", "agents", "iustinianus");
+  agentDir = join(home, "tenant", "agents", "fork-agent");
   process.env.HOME = home;
 });
 
@@ -78,7 +78,7 @@ describe("ensureClaudeGatesAccepted", () => {
     expect(readSettings().skipDangerousModePermissionPrompt).toBe(true);
   });
 
-  it("seeds the new bypass key even when ~/.claude.json is absent (fresh install — the Legoza case)", () => {
+  it("seeds the new bypass key even when ~/.claude.json is absent (fresh install — the foreign-install case)", () => {
     // fresh box: no ~/.claude.json yet, but the disclaimer must still be pre-accepted
     ensureClaudeGatesAccepted(agentDir);
     expect(existsSync(cfgPath())).toBe(false); // we do not fabricate ~/.claude.json

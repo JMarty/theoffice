@@ -27,7 +27,7 @@ describe("writeAgentSettings — runtime filesystem denies", () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "profile-"));
-    agentDir = join(root, "agents", "mancika");
+    agentDir = join(root, "agents", "agent-b");
     mkdirSync(agentDir, { recursive: true });
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -36,19 +36,19 @@ describe("writeAgentSettings — runtime filesystem denies", () => {
     JSON.parse(readFileSync(join(agentDir, ".claude", "settings.json"), "utf8")).permissions.deny as string[];
 
   it("denies every agent's provider login directory", () => {
-    writeAgentSettings(cfg(), { id: "mancika", dir: agentDir, profile: "does-not-exist" } as never);
+    writeAgentSettings(cfg(), { id: "agent-b", dir: agentDir, profile: "does-not-exist" } as never);
     expect(denies()).toContain(`Read(${join(root, "agents")}/*/home/**)`);
   });
 
   it("denies the database AND its backups with one glob", () => {
     // A backup holds the same memories as the live file; denying only the live file was decorative.
-    writeAgentSettings(cfg(), { id: "mancika", dir: agentDir, profile: "does-not-exist" } as never);
+    writeAgentSettings(cfg(), { id: "agent-b", dir: agentDir, profile: "does-not-exist" } as never);
     const db = join(root, "store", "theoffice.db");
     expect(denies()).toContain(`Read(${db}*)`);
   });
 
   it("denies all connectors when the named profile is missing (fail-safe, not fail-open)", () => {
-    writeAgentSettings(cfg(), { id: "mancika", dir: agentDir, profile: "typo-in-the-name" } as never);
+    writeAgentSettings(cfg(), { id: "agent-b", dir: agentDir, profile: "typo-in-the-name" } as never);
     expect(denies()).toContain("mcp__claude_ai_*");
   });
 
@@ -57,7 +57,7 @@ describe("writeAgentSettings — runtime filesystem denies", () => {
     mkdirSync(profDir, { recursive: true });
     // profile.ts resolves templates from REPO_ROOT, so this only asserts the merge shape via the
     // fail-safe path: whatever the profile contributes must survive next to the path denies.
-    writeAgentSettings(cfg(), { id: "mancika", dir: agentDir, profile: "missing" } as never);
+    writeAgentSettings(cfg(), { id: "agent-b", dir: agentDir, profile: "missing" } as never);
     const d = denies();
     expect(d.some((x) => x.startsWith("mcp__"))).toBe(true);
     expect(d.some((x) => x.startsWith("Read("))).toBe(true);
@@ -66,7 +66,7 @@ describe("writeAgentSettings — runtime filesystem denies", () => {
   it("a full-access agent gets no settings file at all, and a stale one is removed", () => {
     mkdirSync(join(agentDir, ".claude"), { recursive: true });
     writeFileSync(join(agentDir, ".claude", "settings.json"), "{}");
-    writeAgentSettings(cfg(), { id: "iustinianus", dir: agentDir } as never); // no profile = full access
+    writeAgentSettings(cfg(), { id: "fork-agent", dir: agentDir } as never); // no profile = full access
     expect(existsSync(join(agentDir, ".claude", "settings.json"))).toBe(false);
   });
 });

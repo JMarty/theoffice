@@ -1,12 +1,12 @@
-// Pure delivery-policy decisions, split out from the DB/tmux I/O so the rules born from the 2026-08-04
-// delivery outage are unit-testable without a live fleet. Three rules:
+// Pure delivery-policy decisions, split out from the DB/tmux I/O so the rules born from a delivery outage
+// are unit-testable without a live fleet. Three rules:
 //
 //   1. Owner messages must NEVER fail silently. A source='channel' item that exhausts its delivery
 //      budget (or hits a wedged pane) has to reach the owner by SOME path — a Slack fallback DM — not a
-//      log line. On 2026-08-02 five source='channel' rows were markFailed with last_error='dirty-pane'
-//      and simply vanished; three of them were Szoszo escalating that another agent had gone silent.
-//   2. Owner messages jump the queue. listQueued was id-ASC, so a live owner message sat behind stale
-//      scheduler heartbeats (incl. an already-moot 08:35 briefing). Owner (channel) sorts ahead of all.
+//      log line. Rows that were markFailed with last_error='dirty-pane' simply vanished, and some of them
+//      were the owner escalating that an agent had gone silent.
+//   2. Owner messages jump the queue. A flat id-ASC listQueued lets a live owner message sit behind stale
+//      scheduler heartbeats (incl. an already-moot briefing). Owner (channel) sorts ahead of all.
 //   3. A stale scheduler heartbeat is worth less than the turn it costs. A briefing hours late is moot;
 //      drop it on drain rather than spend an agent turn on it. NEVER applies to channel/bus/manual.
 //
@@ -51,7 +51,7 @@ function preview(prompt: string): string {
 
 /**
  * The loud owner-facing alarm for a message from the owner that was DROPPED (status=failed). Names the
- * target agent, the reason, and quotes a preview so Szoszo knows exactly which message to re-send. Pure,
+ * target agent, the reason, and quotes a preview so the owner knows exactly which message to re-send. Pure,
  * so its shape is pinned by a test. Slack mrkdwn.
  */
 export function ownerDropAlarmText(agentId: string, reason: string, prompt: string): string {
@@ -64,7 +64,7 @@ export function ownerDropAlarmText(agentId: string, reason: string, prompt: stri
 
 /**
  * The owner-facing alarm for a message that is still QUEUED and has NOT reached the agent after
- * `minutesWaiting` minutes — the 2026-08-04 case, where a message parks behind a modal, never attempted,
+ * `minutesWaiting` minutes — the case where a message parks behind a modal, never attempted,
  * never failed. Worded as "not yet delivered / may be stuck" because at this point it is a stall, not a
  * confirmed drop: honest whether the agent is wedged or merely deep in a very long turn. Pure.
  */

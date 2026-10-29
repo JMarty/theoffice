@@ -1,0 +1,11 @@
+[Unit]
+Description=owner-watchdog — catch owner messages delivered to an agent whose turn died mid-reply (delivered-but-silent gap)
+After=network.target
+
+[Service]
+Type=oneshot
+# ALERT is always live. Auto-RE-DRIVE is armed but OFF by default — flip to 1 to enable
+# (dedupe-safe: only re-drives a delivered owner row with ZERO agent outbound since delivery,
+# capped at OWNER_WATCHDOG_MAX_REDRIVES). Kill-switch = set back to 0, or stop the timer.
+Environment=OWNER_WATCHDOG_REDRIVE=0
+ExecStart=/usr/bin/python3 @ROOT@/tools/owner-watchdog/owner_watchdog.py --verbose

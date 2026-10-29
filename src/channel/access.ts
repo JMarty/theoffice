@@ -5,8 +5,8 @@
  *  - if there is NO list but an owner IS configured -> owner-only (deny others)
  *  - if there is NO list and NO owner configured yet -> open (initial setup only)
  *
- * This is the gate that lets Gergő reach only Ryan and your wife reach only
- * Dwight, while everyone else is locked out of your private agents — even though
+ * This is the gate that lets a family member reach only one agent and a partner reach only
+ * one other agent, while everyone else is locked out of your private agents — even though
  * they share one Slack workspace.
  */
 export function isAllowedSender(

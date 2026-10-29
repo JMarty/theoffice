@@ -1,24 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { parseInbound, prepareInboundDelivery, parseDeri6Signal } from "./slack-ingest.js";
+import { parseInbound, prepareInboundDelivery, parsePortalSignal } from "./slack-ingest.js";
 import { isAllowedSender } from "./access.js";
 
 describe("prepareInboundDelivery (non-owner sender identity + routing safety)", () => {
-  // SECURITY: a non-owner allowed contact (e.g. Hanga via allowFrom) must never be mistaken for the owner,
-  // and a reply must always go to the actual sender — never to the owner's DM. (2026-06-20 orchid-cancel bug.)
-  const base = "cancel the orchid watering task";
-  const ownerName = "Szoszo";
+  // SECURITY: a non-owner allowed contact (e.g. Jane via allowFrom) must never be mistaken for the owner,
+  // and a reply must always go to the actual sender — never to the owner's DM. (a reply routed to the wrong person.)
+  const base = "cancel the weekly report task";
+  const ownerName = "Owner";
 
   it("non-owner allowed sender: banner NAMES them, warns NOT-owner, reply routes to the SENDER", () => {
     const { prompt, replyUser } = prepareInboundDelivery({
-      basePrompt: base, senderId: "U_hanga", ownerId: "U_owner", ownerName, senderName: "Hanga",
+      basePrompt: base, senderId: "U_contact", ownerId: "U_owner", ownerName, senderName: "Jane",
     });
-    expect(prompt).toContain("Hanga"); // names them
+    expect(prompt).toContain("Jane"); // names them
     expect(prompt).toContain("NOT your owner");
     expect(prompt).toContain(ownerName);
     expect(prompt).toMatch(/owner-only/i); // warns against owner-only authority
     expect(prompt.endsWith(base)).toBe(true); // original message preserved, after the banner
     expect(prompt).not.toBe(base);
-    expect(replyUser).toBe("U_hanga"); // reply goes to the sender, NOT the owner
+    expect(replyUser).toBe("U_contact"); // reply goes to the sender, NOT the owner
   });
 
   it("owner: NO banner, prompt unchanged, reply routes to owner", () => {
@@ -130,14 +130,14 @@ describe("parseInbound", () => {
   });
 });
 
-describe("parseDeri6Signal (scoped bot-message exception — deri6 OCR + bill triggers)", () => {
+describe("parsePortalSignal (scoped bot-message exception — portal OCR + bill triggers)", () => {
   // SECURITY: the global bot-drop in parseInbound stays intact; this is the ONE narrow exception —
   // a bot post in the dedicated channel carrying the shared secret + a valid UUID, delivered as
   // DATA ONLY (a fixed prompt template, never the bot's free text). Adversarial coverage per Toby's
   // review: wrong channel / not-a-bot / bad-or-missing secret / non-UUID / non-object JSON are all dropped.
   // The `type` field is a strict enum (ocr|bill, absent=ocr); anything else is rejected.
   const sig = { channelId: "C_ocr", secret: "s3cr3t-signal" };
-  const UUID = "0adb4dcd-6677-4a34-a862-251687cd4e39";
+  const UUID = "6f1d1c3a-5b2e-4c8a-9d7e-0a1b2c3d4e5f";
   const signal = (over: Record<string, unknown> = {}, payloadOver: Record<string, unknown> = {}) => ({
     type: "message",
     channel: sig.channelId,
@@ -147,81 +147,81 @@ describe("parseDeri6Signal (scoped bot-message exception — deri6 OCR + bill tr
   });
 
   it("accepts a valid bot signal: absent type defaults to ocr (back-compat)", () => {
-    expect(parseDeri6Signal(signal(), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "ocr", sorszam: null });
+    expect(parsePortalSignal(signal(), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "ocr", sorszam: null });
   });
 
   it("honors explicit type: ocr and bill (sorszam null for non-archive)", () => {
-    expect(parseDeri6Signal(signal({}, { type: "ocr" }), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "ocr", sorszam: null });
-    expect(parseDeri6Signal(signal({}, { type: "bill" }), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "bill", sorszam: null });
+    expect(parsePortalSignal(signal({}, { type: "ocr" }), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "ocr", sorszam: null });
+    expect(parsePortalSignal(signal({}, { type: "bill" }), sig)).toEqual({ submissionId: UUID, channel: sig.channelId, type: "bill", sorszam: null });
   });
 
   it("archive: needs a strict YYYY/NNN sorszám alongside the UUID", () => {
-    expect(parseDeri6Signal(signal({}, { type: "archive", sorszam: "2026/001" }), sig))
+    expect(parsePortalSignal(signal({}, { type: "archive", sorszam: "2026/001" }), sig))
       .toEqual({ submissionId: UUID, channel: sig.channelId, type: "archive", sorszam: "2026/001" });
     // missing / malformed / injection-y sorszám → dropped (the only extra value interpolated downstream)
     for (const bad of [undefined, "2026-001", "2026/1", "2026/001/x", "../../x", "2026/001; rm", 12, { s: 1 }]) {
-      expect(parseDeri6Signal(signal({}, { type: "archive", sorszam: bad }), sig)).toBeNull();
+      expect(parsePortalSignal(signal({}, { type: "archive", sorszam: bad }), sig)).toBeNull();
     }
   });
 
   it("REJECTS an unknown or non-string type (never default-accept a malformed signal)", () => {
-    expect(parseDeri6Signal(signal({}, { type: "exec" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: "OCR" }), sig)).toBeNull(); // case-sensitive enum
-    expect(parseDeri6Signal(signal({}, { type: "Archive" }), sig)).toBeNull(); // case-sensitive
-    expect(parseDeri6Signal(signal({}, { type: 1 }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: null }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: { evil: true } }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "exec" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "OCR" }), sig)).toBeNull(); // case-sensitive enum
+    expect(parsePortalSignal(signal({}, { type: "Archive" }), sig)).toBeNull(); // case-sensitive
+    expect(parsePortalSignal(signal({}, { type: 1 }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: null }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: { evil: true } }), sig)).toBeNull();
   });
 
   it("bill AND archive still pass EVERY other gate (bad UUID / wrong secret / wrong channel → null)", () => {
-    expect(parseDeri6Signal(signal({}, { type: "bill", submission_id: "nope" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: "bill", signal_secret: "wrong" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({ channel: "C_other" }, { type: "bill" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: "archive", sorszam: "2026/001", submission_id: "nope" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { type: "archive", sorszam: "2026/001", signal_secret: "wrong" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({ channel: "C_other" }, { type: "archive", sorszam: "2026/001" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "bill", submission_id: "nope" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "bill", signal_secret: "wrong" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ channel: "C_other" }, { type: "bill" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "archive", sorszam: "2026/001", submission_id: "nope" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { type: "archive", sorszam: "2026/001", signal_secret: "wrong" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ channel: "C_other" }, { type: "archive", sorszam: "2026/001" }), sig)).toBeNull();
   });
 
   it("feature disabled (no sig) → null, path inert", () => {
-    expect(parseDeri6Signal(signal(), undefined)).toBeNull();
+    expect(parsePortalSignal(signal(), undefined)).toBeNull();
   });
 
   it("wrong channel → null even with the correct secret (channel gate is independent)", () => {
-    expect(parseDeri6Signal(signal({ channel: "C_other" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ channel: "C_other" }), sig)).toBeNull();
   });
 
   it("not a bot post (human message, no bot_id) → null", () => {
     const ev = signal();
     delete (ev as Record<string, unknown>).bot_id;
-    expect(parseDeri6Signal(ev, sig)).toBeNull();
+    expect(parsePortalSignal(ev, sig)).toBeNull();
   });
 
   it("non-message event type → null", () => {
-    expect(parseDeri6Signal(signal({ type: "reaction_added" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ type: "reaction_added" }), sig)).toBeNull();
   });
 
   it("missing / wrong secret → null (secret gate)", () => {
-    expect(parseDeri6Signal(signal({}, { signal_secret: "wrong" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({ text: JSON.stringify({ submission_id: UUID }) }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { signal_secret: "wrong" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ text: JSON.stringify({ submission_id: UUID }) }), sig)).toBeNull();
   });
 
   it("correct secret but non-UUID submission_id → null (strict UUID, nothing else trusted)", () => {
-    expect(parseDeri6Signal(signal({}, { submission_id: "not-a-uuid" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { submission_id: "../../etc/passwd" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({}, { submission_id: 12345 }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { submission_id: "not-a-uuid" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { submission_id: "../../etc/passwd" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({}, { submission_id: 12345 }), sig)).toBeNull();
   });
 
   it("non-object JSON payloads never throw and are dropped (Toby null-guard: null/array/number/string/bool)", () => {
     for (const t of ["null", "[1,2,3]", "42", '"a string"', "true"]) {
-      expect(parseDeri6Signal(signal({ text: t }), sig)).toBeNull();
+      expect(parsePortalSignal(signal({ text: t }), sig)).toBeNull();
     }
   });
 
   it("malformed / empty / missing text → null (never throws)", () => {
-    expect(parseDeri6Signal(signal({ text: "{not json" }), sig)).toBeNull();
-    expect(parseDeri6Signal(signal({ text: "" }), sig)).toBeNull();
-    expect(parseDeri6Signal({ type: "message", channel: sig.channelId, bot_id: "B1" }, sig)).toBeNull();
-    expect(parseDeri6Signal(null, sig)).toBeNull();
+    expect(parsePortalSignal(signal({ text: "{not json" }), sig)).toBeNull();
+    expect(parsePortalSignal(signal({ text: "" }), sig)).toBeNull();
+    expect(parsePortalSignal({ type: "message", channel: sig.channelId, bot_id: "B1" }, sig)).toBeNull();
+    expect(parsePortalSignal(null, sig)).toBeNull();
   });
 });
 

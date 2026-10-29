@@ -3,8 +3,8 @@
 //
 // The problem: a message marked `delivered` to a session that then dies is lost forever. `delivered` is
 // terminal on inbound_queue, so the engine cannot distinguish "the agent read it" from "the agent was
-// OOM-killed three seconds later". On 2026-08-01 an owner Slack message sat unanswered for 36 minutes
-// against a system that considered it handled, and was only recovered because a human hand-fed it back.
+// OOM-killed three seconds later". The result is a user message that sits unanswered against a system
+// that considers it handled, recoverable only by hand.
 //
 // The predicate is NOT doneness (which does not exist on this table) but SESSION-INSTANCE IDENTITY:
 // is the session that received this message still the session that is running now?
@@ -52,24 +52,24 @@ export function decideOrphan(row: OrphanRow, current: SessionSnapshot, opts: Orp
   //    alive and mid-turn — the automated, fleet-wide version of a duplicate owner message.
   if (current.state === "unknown") return "leave";
 
-  // 2. No ref means the row predates this mechanism. This is the gate that holds the 2,084 historical
-  //    orphans (2026-05-26..2026-08-01) out of scope by construction rather than by a date literal
-  //    someone could later "helpfully" widen.
+  // 2. No ref means the row predates this mechanism. This is the gate that holds the historical
+  //    orphans out of scope by construction rather than by a date literal someone could later
+  //    "helpfully" widen.
   if (row.session_ref == null) return "leave";
   if (row.delivered_at == null) return "leave";
 
   // 3. The session that received it is still the session running now -> it is being worked on, or was
   //    already handled. Note this compares INSTANCE, not existence: after a relaunch the agent is
-  //    "present" but is a DIFFERENT instance with none of the context, which is exactly the 9766 case.
+  //    "present" but is a DIFFERENT instance with none of the context, which is exactly the case this module exists for.
   if (current.state === "present" && current.ref === row.session_ref) return "leave";
 
   // 4. Recency bound: a resurrection from days ago is noise at best and confusing at worst.
   if (opts.now - row.delivered_at > opts.maxAgeSec) return "leave";
 
   // 5. THE SAFETY GATE. If the agent produced output AFTER this was delivered, it was alive and working
-  //    past it, so re-sending would duplicate something already handled. This is the same test used by
-  //    hand on 2026-08-01 to prove 9766 was genuinely unanswered rather than mid-conversation: the
-  //    agent's last outbound PREDATED the inbound by 12 minutes.
+  //    past it, so re-sending would duplicate something already handled. This is the same test one would use by
+  //    hand to prove a message was genuinely unanswered rather than mid-conversation: the agent's last
+  //    outbound PREDATES the inbound.
   if (opts.lastOutboundAt != null && opts.lastOutboundAt > row.delivered_at) return "leave";
 
   // 6. Hard cap, persisted. An agent killed BY a message and then re-fed that same message on relaunch

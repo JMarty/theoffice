@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the auto-compact context watchdog every 2 min
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=120s
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

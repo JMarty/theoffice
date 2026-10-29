@@ -31,7 +31,7 @@ import sys
 path, agent_id = sys.argv[1], sys.argv[2]
 block = (
     "- **Changing your own model or thinking effort.** If the owner asks you to think harder or "
-    "lighter, or to run on a different model (\"állítsd magad xhigh effortra\", \"switch to sonnet\"), "
+    "lighter, or to run on a different model (\"set yourself to xhigh effort\", \"switch to sonnet\"), "
     "run in Bash:\n"
     "  `office-tune effort xhigh` or `office-tune model claude-sonnet-5`\n"
     "  Effort levels: low, medium, high, xhigh, max. The value is saved to your `agent.json`, so it "

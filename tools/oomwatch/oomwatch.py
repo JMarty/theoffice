@@ -2,16 +2,16 @@
 """oomwatch — push-only cgroup detector: OOM-kills (event-driven) + swap-growth (cheap tick).
 
 WHY THIS EXISTS
-    The old memory-pressure watch sampled *available RAM* (a gauge) every 10 min. On
-    2026-08-03 an OOM kill happened BETWEEN samples and was never seen — a sampler that
+    The old memory-pressure watch sampled *available RAM* (a gauge) every 10 min. An OOM kill
+    can happen BETWEEN samples and never be seen — a sampler that
     structurally misses the event it exists to catch reads as coverage while being blind.
 
     /sys/fs/cgroup/memory.events `oom_kill` is a MONOTONIC COUNTER. A kill cannot slip
     between reads: whenever we next read, the increment is still there. So detection is
     authoritative regardless of timing.
 
-    2026-08-04 — NEW AXIS. Szoszo had to manually reboot the Proxmox host: our LXC filled the
-    host's 4GB swap and frigate (on the host, not our LXC) starved. earlyoom + the oom_kill
+    SWAP AXIS. A container that fills the host's swap can starve other services on the host and force
+    a manual host reboot. earlyoom + the oom_kill
     watch are both blind to this: the kernel avoids the low-free-RAM number by SWAPPING, so the
     host thrashes while free RAM inside the container still looks fine. memory.swap.current is
     the gauge nothing watched. We now also NOTIFY when container swap crosses a threshold. The
@@ -20,7 +20,7 @@ WHY THIS EXISTS
     additionally SHED ollama as a SECONDARY, edge-triggered action — it frees ~1.3GB RAM and so
     relieves pressure, but it does NOT reclaim the swap that tripped the wire (Linux swaps pages
     back only when TOUCHED, not on free RAM), so it is never the fix, only relief. There is no
-    host swap cap (Szoszo ruled it out 08-04), so this in-container wire is the ONLY guard on the
+    host swap cap in this deployment, so this in-container wire is the ONLY guard on the
     swap axis.
 
 DESIGN (FLEET RULE 1 — infra does the watching; this is a tiny 64MB-capped daemon, NOT an agent
@@ -42,70 +42,23 @@ import select
 import sys
 import time
 import urllib.request
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 
 CG_EVENTS = "/sys/fs/cgroup/memory.events"          # container root: aggregates every child
 CG_SWAP_CUR = "/sys/fs/cgroup/memory.swap.current"  # container root: total swap in use by us
-STATE = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant"),
+STATE = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", TENANT),
                      "store", "oomwatch.state.json")
 SWAP_SAMPLE_S = 60                                  # poll timeout == swap sample gap (monotonic oom still exact)
 RESYNC_TIMEOUT_S = 3600                             # worst-case oom re-read bound (unchanged guarantee)
 # --- Swap tripwire ---------------------------------------------------------------------------
-# THRESHOLD (MiB), re-derived against the MEASURED post-#1 reality (2026-08-04, after the ollama
-# cap went live). An earlier draft used 1024, derived from a ~516 MiB steady that assumed
-# everything-but-ollama stayed put. WRONG: #1 itself moved that dependency. With ollama pinning
-# ~1.7-1.9 GB resident (MemorySwapMax=0, no cold-page drift), the kernel evicted AGENT cold pages
-# to swap instead — and eviction is STICKY (Linux swaps back only on TOUCH, never on free RAM), so
-# it does NOT recede when ollama unloads. Measured, model-unloaded/idle:
-#     ollama 0 + agents ~807 + java ~182 + other ~147 = ~1134 MiB, observed band ~1100-1350.
-# PROOF it's sticky: unloading the model dropped ollama resident 1720->430 MiB while container
-# swap held 1135->1134 MiB. So the honest post-#1 steady is ~1.1 GB, NOT 0.5 GB.
-#   RE-DERIVED 2026-09-07 (Darryl, marveen-approved 14601): the steady band CREPT UP as the agent
-#   fleet grew to ~10 long-lived sessions — cold-page accumulation, so the observed band moved to
-#   ~2000-2238 MiB.
-#   *** THE PARENTHETICAL HERE WAS FALSE AND IS DELETED (darryl, 2026-09-27 06:50). *** It read
-#   "(nightly reset clears context but did not re-exec the process)". Measured while chasing cfo's
-#   unexplained 05:30 item: THERE IS NO NIGHTLY RESET. `cleanreset` exists only as an API action
-#   spawning clean_reset.py, whose own docstring calls it the dashboard "Handoff + Reset" BUTTON.
-#   Zero cron entries, zero systemd timers, zero task-configs reference it, and its log records 15
-#   invocations ever — none between 05:00 and 06:00, last one 2026-09-26 15:44. Six agent processes
-#   are at ELEVEN DAYS uptime. So context accumulates too, not just cold pages, and the band creep has
-#   a larger cause than the comment claimed. Card e73caff6. This matters here because the deleted
-#   clause was the reason given for expecting the baseline to "drop back down" once a re-exec landed —
-#   an expectation resting on a scheduled reset that does not exist. At 2048 the tripwire
-#   sat INSIDE that band and fired daily false in-band crossings (2026-09-06/07). Raised to 2500 =
-#   a few hundred MiB above the ~2165-2238 band, so routine fleet breathing won't trip it while a
-#   genuine runaway still alarms, and it still leaves ~1.6 GB runway to the 4 GB host-backed ceiling.
-#   The durable fix (re-exec agents on the nightly reset, in progress) will drop the baseline back
-#   down; revisit this threshold downward once that lands. Heartbeats never latch (gradual growth
-#   above 2500 keeps re-alerting), and the (B) noise-dedup still suppresses flat-repeat heartbeats.
-#   *** THE PARAGRAPH ABOVE IS FALSIFIED BY THIS ALARM'S OWN HISTORY (darryl, 2026-09-27). ***
-#   It claims 2500 is "a few hundred MiB above the ~2165-2238 band, so routine fleet breathing won't
-#   trip it while a genuine runaway still alarms." Measured across this alarm's 34 bus crossings,
-#   2026-08-18 .. 09-27:
-#       BEFORE the 2048->2500 raise:  n=18  min 2048  max 3730  MEDIAN 2103
-#       AFTER  the raise:             n=16  min 2508  max 3275  MEDIAN 2567
-#   Same crossing rate. The raise moved the threshold from inside one band to inside a HIGHER band,
-#   because the band moved with it: routine peaks are now 2500-2650 against a ~2124 baseline, and the
-#   genuine excursions are 2892 / 3275 / 3730.
-#   WHY THIS COMMENT MATTERS MORE THAN THE NUMBER: a reader who believes "routine breathing won't trip
-#   it" reads any crossing as a runaway and acts on that. A confidently wrong REASON ends the
-#   investigation and prescribes a remedy - which is the defect this tool exists to catch, sitting in
-#   its own explanation. Same class as the line below it asserting that shedding ollama "does NOT pull
-#   these pages back": the shed ran on 2026-09-27 and ~490 MiB came back.
-#   *** AND MY OWN "RAISE IT TO 2900" PROPOSAL IS FALSIFIED TOO, TWO HOURS AFTER I MADE IT. ***
-#   I had argued: routine peaks are 2500-2650, genuine excursions are 2892/3275/3730, so 2900 would sit
-#   above the band. Then 2026-09-27 06:25 crossed at 2862 and self-cleared to 2025 within six minutes.
-#   2862 is 30 MiB below the figure I had called the excursion floor, and it behaved exactly like the
-#   sawtooth. So PEAK HEIGHT DOES NOT SEPARATE AN EXCURSION FROM A SAWTOOTH - only PERSISTENCE does, and
-#   a third threshold raise would fail for the same reason the first two did. That is now measured
-#   rather than argued, and it is the strongest evidence 9e1d0a3d has.
-#   NOT CHANGING THE THRESHOLD HERE. Raising it a third time repeats the error. The fix is the TRIGGER,
-#   not the level - a level test cannot distinguish 3730 from a sawtooth crossing 2500 - and it is
-#   carded as 9e1d0a3d (sustained-breach: require the breach to PERSIST for N minutes). Capacity
-#   evidence, which is the actual driver (ten agents at 99% of an 8 GB cgroup), is on 04aec484 ->
-#   235d0c35. marveen's ruling (bus 18763): option B, and not at 04:00 on the axis that caused the
-#   2026-08-04 manual reboot.
-SWAP_HIGH_MIB = 2500
+# THRESHOLD (MiB): size it from your own measured steady state, not from a guess. Swap eviction is STICKY
+# (Linux swaps pages back only when they are TOUCHED, never just because RAM is free), so the baseline does
+# not recede when a big consumer unloads, and it creeps up as long-lived sessions accumulate cold pages.
+# Set it a few hundred MiB above your normal band and leave runway below the host-backed ceiling. A level
+# test cannot separate a short sawtooth from a runaway (only PERSISTENCE does), so treat a single crossing
+# as a prompt to look at per-process VmSwap, not as proof of a leak.
+SWAP_HIGH_MIB = int(os.environ.get("OOMWATCH_SWAP_HIGH_MIB", "2500"))
 # RE-ARM IS TIME-BASED, NOT LEVEL-BASED — this is the fix for the silent-guard defect. The old
 # design re-armed only when swap fell back under a CLEAR level sitting ~12 MiB under steady; if
 # steady ever crept past CLEAR the tripwire would fire once and latch off forever while still
@@ -115,7 +68,7 @@ SWAP_HIGH_MIB = 2500
 # we go silent beyond FIRE_COOLDOWN_S. Persisting-high => a heartbeat every FIRE_COOLDOWN_S (the
 # opposite of silent); dropping-low => we simply stop firing. See the proof note in main().
 FIRE_COOLDOWN_S = 600                                # max silence while persistently high = 10 min
-# (B) HEARTBEAT NOISE-DEDUP (marveen-approved 2026-09-02; noise-only, does NOT lower detection).
+# (B) HEARTBEAT NOISE-DEDUP (noise-only, does NOT lower detection).
 # Problem: while swap sits FLAT above SWAP_HIGH_MIB the notify re-fires every FIRE_COOLDOWN_S with an
 # identical, already-reported value (16+ persistence heartbeats for one unchanged crossing). Fix: a
 # persistence heartbeat re-fires ONLY when it is not a pure repeat — GROWTH >= SWAP_HB_EPSILON_MIB
@@ -128,7 +81,7 @@ SWAP_HB_EPSILON_MIB = 64                             # >=64 MiB rise above last-
 SWAP_HB_KEEPALIVE_S = 21600                          # never fully silent while high: >=1 flat "still high" ping / 6h
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE", "http://127.0.0.1:11434")
 SHED_MODEL = os.environ.get("OOMWATCH_SHED_MODEL", "bge-m3")
-WAKE_TO = "darryl"                                   # owning agent for OOM triage
+WAKE_TO = os.environ.get("OOMWATCH_WAKE_TO", "marveen")     # owning agent for OOM triage
 WAKE_FROM = "oomwatch"
 
 
@@ -137,7 +90,7 @@ def _api_base() -> str:
 
 
 def _bearer() -> str:
-    p = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant"),
+    p = os.path.join(os.environ.get("OFFICE_TENANT_ROOT", TENANT),
                      "store", ".dashboard-token")
     try:
         return open(p).read().strip()
@@ -220,15 +173,11 @@ def shed_ollama() -> str:
         return "shed ollama:%s FAILED (%s)" % (SHED_MODEL, ex)
 
 
-# WAKE_FROM IS NOT A ROUTABLE AGENT, AND THE READER IS TOLD TO REPLY TO IT (darryl, 2026-09-27).
-# `oomwatch` is not in GET /api/agents, so every alert this tool sends arrives with a `from` nobody can
-# answer -- and the harness's own footer instructs the recipient to "reply BACK TO THE SENDER". Doing
-# that creates a dead row: POST /api/messages validates that `to` is PRESENT, not ROUTABLE, returns a
-# success id, and the message reaches no one. 53 such rows to `oomwatch` already exist, all written by
-# me, and tonight's census found 316 across 16 names (card 4939942e).
-# Keeping `from: oomwatch` is deliberate -- it tells the reader WHICH tool fired, which a routable
-# sender name would destroy. So the fix is not the name, it is that the dead end must be STATED rather
-# than discovered: the alert now carries its own no-reply line and names a routable escalation target.
+# WAKE_FROM IS NOT A ROUTABLE AGENT. `oomwatch` is not in GET /api/agents, so every alert arrives with a
+# `from` nobody can answer, and the harness footer tells the recipient to "reply BACK TO THE SENDER": that
+# creates a dead row (the bus validates that `to` is present, not routable). Keeping `from: oomwatch` is
+# deliberate -- it tells the reader WHICH tool fired -- so the dead end is STATED in the alert (a no-reply
+# line plus a routable escalation target) rather than discovered.
 NO_REPLY_LINE = (
     "\n\nDO NOT REPLY TO THIS MESSAGE. `oomwatch` is a tool, not a roster agent -- a reply to it "
     "returns a success id and reaches nobody. Act directly, or escalate to `marveen`."
@@ -262,7 +211,7 @@ def fire(prev: int, cur: int) -> None:
         "the total). If the victim is a claude AGENT, hand-feed it any message marked delivered "
         "before the crash (destroyed, never redelivered). If it is ollama or another self-restarting "
         "service, verify it recovered and decide if a cap/RAM change is needed. earlyoom does NOT "
-        "protect this LXC (gates on free swap = fictional here)."
+        "protect this container (gates on free swap = fictional here)."
     ) % (prev, cur, delta, avail)
     _post_bus(content, "oom_kill %d->%d" % (prev, cur))
 
@@ -276,19 +225,16 @@ def fire_swap(cur_mib: int, action_note: str, heartbeat_n: int) -> None:
         else "SWAP-GROWTH TRIPWIRE (fresh crossing)"
     content = (
         "%s (push): container memory.swap.current is %d MiB, over the %d MiB threshold "
-        "(avail RAM %s%%). This is the axis that starved frigate on 2026-08-04 — the host thrashes "
-        "on swap while free RAM inside the LXC still looks fine, so earlyoom + the oom_kill watch "
+        "(avail RAM %s%%). This axis can starve the host — it thrashes "
+        "on swap while free RAM inside the container still looks fine, so earlyoom + the oom_kill watch "
         "are both blind to it. SECONDARY ACTION: %s. TRIAGE: post-#1 ollama holds ~0 swap "
         "(MemorySwapMax=0), so this growth is AGENT/misc pages — find it via per-process VmSwap in "
-        "/proc/*/status. There is NO host swap cap (Szoszo ruled it out 08-04), so nothing stops "
-        "container swap reaching the full host-backed 4 GB — the path that forced the manual reboot. "
-        # CORRECTED 2026-09-27: this asserted "does NOT pull these pages back" as fact. MEASURED on
-        # 2026-09-27: the shed ran and swap fell 2519 -> 2028 MiB, ~490 MiB back. Whether the shed
-        # reclaimed it or something else did is NOT established - so the alert now reports the
-        # observation and declines the mechanism. An alarm that explains a mechanism wrongly is worse
+        "/proc/*/status. There is NO host swap cap here, so nothing stops "
+        "container swap reaching the full host-backed 4 GB — the path that can force a manual host reboot. "
+        # Report the observation, decline the mechanism: an alarm that explains a mechanism wrongly is worse
         # than one that explains nothing, because the reader acts on the explanation.
         "Shedding ollama frees RAM (relieves pressure); whether it also returns swapped pages is NOT "
-        "established - on 2026-09-27 a shed coincided with ~490 MiB of swap returning, cause unknown. So if "
+        "established - a shed has coincided with swap returning, cause unknown. So if "
         "swap keeps climbing, escalate: something is leaking and needs a hard cap of its own."
     ) % (kind, cur_mib, SWAP_HIGH_MIB, avail, action_note)
     _post_bus(content, "swap-high %d MiB (hb#%d)" % (cur_mib, heartbeat_n))
@@ -312,12 +258,11 @@ def main() -> int:
         save_baseline(base)
     elif cur < base:
         # COUNTER RESET. A monotonic counter cannot decrease, so a lower current value means the
-        # kernel counter was zeroed — host/LXC REBOOT or the cgroup was recreated. The persisted
+        # kernel counter was zeroed — host/container REBOOT or the cgroup was recreated. The persisted
         # baseline is meaningless now; adopt current so we are armed against the NEXT kill.
         # WITHOUT this branch a stale-high baseline silently swallows the next (base-cur) real
-        # kills — which is EXACTLY what happened on 2026-08-04: the host reboot reset oom_kill to
-        # 0 while the persisted baseline stayed 2, and the deployed watcher logged "armed:
-        # baseline=2" and went blind to the next two kills. Kills before the reset died with the
+        # kills — which is what happens when a host reboot resets oom_kill to
+        # 0 while the persisted baseline stays above it: the watcher logs "armed" and goes blind to the next kills. Kills before the reset died with the
         # old kernel counter and can't be recovered, but a reboot is already a louder signal than
         # an OOM, so nothing actionable is lost.
         log("counter reset (persisted=%d > current=%d): reboot/cgroup-recreate -> re-baseline to %d"
@@ -352,16 +297,15 @@ def main() -> int:
         % (SWAP_SAMPLE_S, SWAP_HIGH_MIB, FIRE_COOLDOWN_S, RESYNC_TIMEOUT_S))
     while True:
         events = poller.poll(SWAP_SAMPLE_S * 1000)      # blocks; wakes on kernel edge OR every SWAP_SAMPLE_S
-        # CPU-SPIN FIX (marveen 2026-08-04, found by Toby, measured 91% of one core).
+        # CPU-SPIN FIX (measured at 91% of one core).
         # cgroup v2 keeps POLLPRI ASSERTED on memory.events until the REGISTERED fd is read.
         # Every reader here opens a FRESH fd, so the registered one was never consumed: after
         # the FIRST oom_kill asserts POLLPRI, poll() returns instantly forever and the loop
         # busy-spins until restart. Detection still worked (monotonic counter re-read each
         # pass), so it was pure CPU burn with no blindness — which is why it went unnoticed.
-        # It matters most exactly when we can least afford it: an ollama OOM during the
-        # re-embed would light this up and steal a core from a CPU-only embedder.
-        # Marveen + Darryl both wrote this re-arm independently (2026-08-04); the duplicate
-        # unconditional copy was removed and Darryl's louder failure log kept. Re-arm ONLY when
+        # It matters most exactly when we can least afford it: an OOM in a co-located
+        # embedder would light this up and steal a core from it.
+        # Re-arm ONLY when
         # POLLPRI actually fired — on the plain SWAP_SAMPLE_S timeout path there is no edge to clear.
         if events:
             try:

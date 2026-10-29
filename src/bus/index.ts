@@ -62,7 +62,7 @@ export function deliverPendingMessages(): number {
         enqueueInbound({
           agentId: "marveen",
           source: "manual",
-          prompt: `[BUS CIRCUIT BREAKER TRIPPED] ${recentTotal} inter-agent messages in ${BRK_WINDOW_SEC}s (limit ${BRK_GLOBAL_LIMIT}). The bus AUTO-HALTED delivery to stop a loop. Find the looping pair (SELECT from_agent,to_agent,COUNT(*) n FROM agent_messages WHERE created_at>unixepoch()-${BRK_WINDOW_SEC} GROUP BY 1,2 ORDER BY n DESC), fix the cause, summarize, and tell Szoszo. Do NOT just resume.`,
+          prompt: `[BUS CIRCUIT BREAKER TRIPPED] ${recentTotal} inter-agent messages in ${BRK_WINDOW_SEC}s (limit ${BRK_GLOBAL_LIMIT}). The bus AUTO-HALTED delivery to stop a loop. Find the looping pair (SELECT from_agent,to_agent,COUNT(*) n FROM agent_messages WHERE created_at>unixepoch()-${BRK_WINDOW_SEC} GROUP BY 1,2 ORDER BY n DESC), fix the cause, summarize, and tell ${busCfg?.owner.displayName ?? "the owner"}. Do NOT just resume.`,
           dedupKey: `breaker-trip:${Math.floor(Date.now() / 60000)}`,
         });
       } catch (err) {

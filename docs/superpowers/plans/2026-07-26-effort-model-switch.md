@@ -20,7 +20,7 @@
 - Never `killSession` on a model or effort change — that is the context loss this work removes.
 - Tests run with `npx vitest run <path>`; typecheck with `npm run typecheck`.
 - Commit messages follow the repo's conventional style, e.g. `feat(session): ...`, `fix(web): ...`, `test(session): ...`.
-- Do NOT edit anything under `tenant/` — that is the owner's live data (Argus's stale Gemini label is explicitly out of scope).
+- Do NOT edit anything under `tenant/` — that is the owner's live data (Agent-b's stale Gemini label is explicitly out of scope).
 
 ---
 
@@ -70,7 +70,7 @@ Append to `src/session/runtime.test.ts`, inside the existing `describe("runtime 
     expect(models).toContain("claude-opus-5");
     expect(models).toContain("claude-fable-5");
     expect(models).toContain("claude-sonnet-5");
-    // opus 4.8 stays: live agents (home, zeus) still run on it
+    // opus 4.8 stays: live agents (home, agent-a) still run on it
     expect(models).toContain("claude-opus-4-8");
     // the dated snapshot id must not come back — offer the alias
     expect(models).toContain("claude-haiku-4-5");
@@ -98,7 +98,7 @@ Expected: FAIL — claude list has no `claude-opus-5`; gemini entries contain sp
 
 ```typescript
   // Selectable --model ids, verified live against this account's /model menu (2026-07-26).
-  // Opus 4.8 is no longer listed in that menu but stays here: `home` and `zeus` run on it and the
+  // Opus 4.8 is no longer listed in that menu but stays here: `home` and `agent-a` run on it and the
   // menu itself notes that previous model names remain usable via --model, which is how we launch.
   models: [
     "claude-opus-5",
@@ -333,7 +333,7 @@ import type { AgentDef, EngineConfig } from "../types.js";
 
 const cfg = {
   tmux: { socket: "s" },
-  owner: { timezone: "Europe/Budapest" },
+  owner: { timezone: "Europe/Paris" },
   paths: { tenantRoot: "/t", agentsDir: "/t/agents" },
   web: { port: 3430 },
 } as unknown as EngineConfig;
@@ -1122,7 +1122,7 @@ let RUNTIMES = [{ id: "claude", label: "Claude Code", models: [], efforts: [] }]
 - [ ] **Step 5: Verify in the real dashboard**
 
 Run: `npm run build && systemctl --user restart theoffice.service`
-Then open `http://127.0.0.1:3430/mc/` and confirm: Claude agents show an effort dropdown, Argus (gemini) does not, and switching a Claude agent's effort does NOT clear its pane.
+Then open `http://127.0.0.1:3430/mc/` and confirm: Claude agents show an effort dropdown, Agent-b (gemini) does not, and switching a Claude agent's effort does NOT clear its pane.
 
 - [ ] **Step 6: Commit**
 
@@ -1298,7 +1298,7 @@ install -m 0755 scripts/office-tune.sh "$HOME/.local/bin/office-tune"
 
 ```markdown
 - **Changing your own model or thinking effort.** If the owner asks you to change how hard you think
-  or which model you run on ("állítsd magad xhigh effortra", "switch to sonnet"), run:
+  or which model you run on ("set yourself to xhigh effort", "switch to sonnet"), run:
   `office-tune effort xhigh` or `office-tune model claude-sonnet-5`.
   Valid effort levels: low, medium, high, xhigh, max. The change is saved to your agent.json, so it
   survives a restart, and applies to this session without losing our conversation. It takes effect
@@ -1309,7 +1309,7 @@ install -m 0755 scripts/office-tune.sh "$HOME/.local/bin/office-tune"
 - [ ] **Step 5: Verify end-to-end**
 
 Run: `npm run build && systemctl --user restart theoffice.service`
-Then from Slack, DM an agent: *"állítsd magad xhigh effortra"*. Confirm it replies with the change and that its pane's status line shows `◉ xhigh` without the conversation resetting.
+Then from Slack, DM an agent: *"set yourself to xhigh effort"*. Confirm it replies with the change and that its pane's status line shows `◉ xhigh` without the conversation resetting.
 
 - [ ] **Step 6: Commit**
 
@@ -1325,11 +1325,11 @@ git commit -m "feat(channel): office-tune — agents change their own model/effo
 - [ ] `npm run typecheck && npx vitest run` — all green
 - [ ] `npm run lint`
 - [ ] Restart the engine, confirm every agent comes back up: `systemctl --user restart theoffice.service && tmux -L <socket> ls`
-- [ ] Confirm `home` and `zeus` still launch on `claude-opus-4-8` (they are the reason 4.8 stays in the registry)
+- [ ] Confirm `home` and `agent-a` still launch on `claude-opus-4-8` (they are the reason 4.8 stays in the registry)
 - [ ] Set an effort on one agent, restart the engine, confirm it comes back with that effort (`ps aux | grep -- --effort`)
 
 ## Deliberately not in this plan
 
-- Migrating `tenant/agents/argus/agent.json` off the stale `"Gemini 3.1 Pro (High)"` label — owner's live data, needs their explicit go-ahead.
+- Migrating `tenant/agents/agent-b/agent.json` off the stale `"Gemini 3.1 Pro (High)"` label — owner's live data, needs their explicit go-ahead.
 - Codex model support.
 - Interrupting a busy agent to switch immediately (belongs with the open "STOP cannot interrupt" bug).

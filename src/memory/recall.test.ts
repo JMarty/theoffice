@@ -23,7 +23,7 @@ describe("recallForPrompt — bounded session-start preamble", () => {
   });
 
   it("caps the total preamble to a few KB even with a memory-heavy agent", () => {
-    // 80 hot + warm memories at 500 chars each = ~40KB of raw content — the exact overload case.
+    // 80 hot + warm memories at 500 chars each = ~40KB of raw content — the overload case.
     for (let i = 0; i < 40; i++) saveMemory({ agentId: "heavy", category: "hot", content: `H${i}-${"x".repeat(500)}` });
     for (let i = 0; i < 40; i++) saveMemory({ agentId: "heavy", category: "warm", content: `W${i}-${"y".repeat(500)}` });
 
@@ -34,12 +34,10 @@ describe("recallForPrompt — bounded session-start preamble", () => {
   });
 
   it("hot LEADS and takes the most space, but can no longer eliminate warm entirely", () => {
-    // POLICY CHANGED 2026-08-03, deliberately. This used to assert warm was dropped completely when hot
-    // filled the budget. Production showed what that costs: marveen, darryl and cfo were waking with 8
-    // hot memories and ZERO warm, so an agent recalled its active work and none of the owner's stable
-    // preferences or project context. Warm now has a guaranteed floor. Hot still leads, appears first
-    // and gets the largest share; it simply cannot starve the tier that holds "how the owner wants
-    // things done".
+    // Warm has a guaranteed floor. Without one, an agent could wake with many hot memories and ZERO
+    // warm, recalling its active work and none of the user's stable preferences or project context. Hot
+    // still leads, appears first and gets the largest share; it simply cannot starve the tier that
+    // holds "how the user wants things done".
     for (let i = 0; i < 30; i++) saveMemory({ agentId: "prio", category: "hot", content: `HOT${i}-${"a".repeat(450)}` });
     saveMemory({ agentId: "prio", category: "warm", content: "WARM-stable-fact" });
 
@@ -52,11 +50,11 @@ describe("recallForPrompt — bounded session-start preamble", () => {
 
   it("surfaces a small agent's memory fully and untruncated", () => {
     saveMemory({ agentId: "small", category: "hot", content: "active task A" });
-    saveMemory({ agentId: "small", category: "warm", content: "owner prefers X" });
+    saveMemory({ agentId: "small", category: "warm", content: "user prefers X" });
 
     const out = recallForPrompt("small", "");
     expect(out).toContain("active task A");
-    expect(out).toContain("owner prefers X");
+    expect(out).toContain("user prefers X");
     expect(out).not.toContain("more memories not shown");
   });
 

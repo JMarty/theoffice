@@ -48,9 +48,8 @@ export function enqueueInbound(a: EnqueueArgs): number | undefined {
 
 /**
  * Queued items in DELIVERY-PRIORITY order: owner (source='channel') messages first, everything else
- * after, FIFO (id ASC) within each class. Before 2026-08-04 this was a flat id-ASC, so a live owner
- * message queued behind stale scheduler heartbeats — including an already-moot 08:35 briefing — and
- * waited turns for them to drain. The CASE keeps the owner lane ahead without starving the rest: within
+ * after, FIFO (id ASC) within each class. A flat id-ASC would let a live owner message queue behind
+ * stale scheduler heartbeats (including an already-moot briefing) and wait turns for them to drain. The CASE keeps the owner lane ahead without starving the rest: within
  * a class it is still oldest-first. Mirrors queueSourceRank() in policy.ts (kept in sync by test).
  */
 export function listQueued(agentId?: string, limit = 50): InboundItem[] {
@@ -101,7 +100,7 @@ export interface ReapResult {
  * markDelivered/markFailed/requeue, so it is orphaned and would sit forever. MUST run BEFORE
  * startDeliverer, while nothing else writes the queue, so it is race-free. Idempotent.
  *
- * Poison-message guard (Toby): a message that crashes the ENGINE mid-delivery never reaches a runtime's
+ * Poison-message guard: a message that crashes the ENGINE mid-delivery never reaches a runtime's
  * terminal handler, so decideOutcome never gets to fail it on budget — an unconditional requeue would
  * loop reap->deliver->markDelivering(attempts++)->crash->reap forever. So FAIL the rows that have already
  * burned the full budget first, THEN requeue the rest for a normal bounded retry.
@@ -160,8 +159,8 @@ export interface OwnerAlarmRow {
 
 /**
  * The single STATE-OBSERVER for owner (source='channel') messages that need an alarm. Watches state, not
- * call sites, so no delivery path can forget to escalate — and it is the ONLY way to catch the case the
- * 2026-08-04 outage actually hit: messages that sit QUEUED and undelivered (parked behind a modal, never
+ * call sites, so no delivery path can forget to escalate — and it is the ONLY way to catch the case a
+ * delivery outage actually hits: messages that sit QUEUED and undelivered (parked behind a modal, never
  * attempted, so never 'failed'). Returns channel rows that are EITHER
  *   (a) status='failed' and never alarmed                         -> a hard drop, alarm once, OR
  *   (b) status='queued', queued longer than staleSec, and either  -> a stall, alarm on a slow cadence
@@ -249,7 +248,7 @@ export function markOutboundSent(id: number): void {
 }
 
 export function markOutboundFailed(id: number, err: string): void {
-  // DEFENCE IN DEPTH (Toby): `AND status='sending'` so this can only ever touch a CLAIMED row. It
+  // DEFENCE IN DEPTH: `AND status='sending'` so this can only ever touch a CLAIMED row. It
   // can never resurrect a terminal row — a 'sent' row can never be flipped back to 'queued' and
   // re-posted by any future caller, independent of the try-split in slack-send.ts that protects the
   // one current call site. Idempotent: a second call on an already-failed/sent row is a no-op.

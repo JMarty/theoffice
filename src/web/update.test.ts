@@ -7,7 +7,7 @@ import { openDb, closeDb, getDb } from "../db/index.js";
 import { backupDb } from "./update.js";
 
 /**
- * Phase A backup correctness (Toby non-negotiable): the pre-update backup must capture COMMITTED state,
+ * Phase A backup correctness: the pre-update backup must capture COMMITTED state,
  * including rows still in the WAL that a naive `cp theoffice.db` would miss. We commit rows, do NOT
  * checkpoint, then back up and restore-read them.
  */

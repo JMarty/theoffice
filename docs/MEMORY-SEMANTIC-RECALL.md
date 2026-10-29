@@ -7,7 +7,7 @@ Agents recall memories two ways at once:
 
 Without the vector half, nothing breaks: every memory is still stored and still findable by
 keyword. What you lose is the ability to find a memory phrased differently from the question —
-asking "how many bedrooms in the rental?" when the memory says "3-room flat, Baker Street".
+asking "how many rooms does the office have?" when the memory says "a 3-room office, Baker Street".
 That is the whole point of the feature, so it is worth the ten minutes of setup.
 
 ## Setup

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { decideRestart, OVERRIDE_ENV } from "./restart-safety.js";
 
 /**
- * The gate keys on IS THERE ANYTHING TO LOSE, not on COULD I DETERMINE SAFETY (Michael, 2026-08-01).
+ * The gate keys on IS THERE ANYTHING TO LOSE, not on COULD I DETERMINE SAFETY.
  *
  * The first version collapsed both into "cannot determine -> proceed", which waved through the one
  * case the gate exists for: a LIVE FLEET whose blast radius is unreadable. Meanwhile a fresh tenant

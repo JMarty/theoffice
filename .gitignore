@@ -43,3 +43,6 @@ __pycache__/
 *.bak
 *.bak-*
 *.bak.*
+
+# runtime state files written next to tools
+tools/**/.offsite-alert-sig

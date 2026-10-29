@@ -10,7 +10,7 @@
 #   - auth DEAD + >=1 agent has runtime:"codex" in agent.json  -> URGENT page (a LIVE agent is down).
 #   - auth DEAD + NO codex agent yet (pre-cutover)             -> soft WARN page (cutover blocked, nothing broken).
 #   - auth OK                                                  -> log OK, no page.
-# Alert path = the standard Office bus (POST /api/messages from darryl -> marveen, who relays to Szoszo).
+# Alert path = the standard Office bus (POST /api/messages from darryl -> marveen, who relays to the owner).
 #
 # Usage:
 #   bash scripts/codex-auth-age-check.sh            # check + page marveen via the bus if auth is dead
@@ -18,8 +18,9 @@
 set -uo pipefail
 
 API="http://127.0.0.1:3430/api/messages"
-TOKEN_PATH="/opt/claude/theoffice/tenant/store/.dashboard-token"
-AGENTS_DIR="/opt/claude/theoffice/tenant/agents"
+TENANT="${OFFICE_TENANT_ROOT:-$(cd "$(dirname "$0")/../tenant" && pwd)}"
+TOKEN_PATH="$TENANT/store/.dashboard-token"
+AGENTS_DIR="$TENANT/agents"
 AUTH="${HOME}/.codex/auth.json"
 CODEX="${CODEX:-${HOME}/.local/bin/codex}"; command -v "$CODEX" >/dev/null 2>&1 || CODEX="$(command -v codex || echo codex)"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
@@ -56,9 +57,9 @@ fi
 
 # auth is DEAD -> build a severity-appropriate message
 if [ ${#codex_agents[@]} -gt 0 ]; then
-  MSG="🔴 CODEX AUTH DEAD — LIVE agent(s) on Codex are down: ${codex_agents[*]}. They cannot process messages until re-auth. Fix (headless): run \`codex login --device-auth\` as szoszo, open the device URL, approve, then verify \`codex login status\` exits 0. Revert option: flip those agents' agent.json runtime back to \"claude\" + restart."
+  MSG="🔴 CODEX AUTH DEAD — LIVE agent(s) on Codex are down: ${codex_agents[*]}. They cannot process messages until re-auth. Fix (headless): run \`codex login --device-auth\` as the engine user, open the device URL, approve, then verify \`codex login status\` exits 0. Revert option: flip those agents' agent.json runtime back to \"claude\" + restart."
 else
-  MSG="🟠 Codex auth is dead (codex login status failed; last_refresh ${ref_days}d ago). Nothing is broken — no agent is on Codex yet — but the Pete-on-Codex cutover is BLOCKED until re-auth: \`codex login --device-auth\` as szoszo. (Non-LLM watch; daily.)"
+  MSG="🟠 Codex auth is dead (codex login status failed; last_refresh ${ref_days}d ago). Nothing is broken — no agent is on Codex yet — but the Pete-on-Codex cutover is BLOCKED until re-auth: \`codex login --device-auth\` as the engine user. (Non-LLM watch; daily.)"
 fi
 echo "codex-auth-age-check: DEAD (codex login status!=0; last_refresh ${ref_days}d; codex agents: ${codex_agents[*]:-none})"
 

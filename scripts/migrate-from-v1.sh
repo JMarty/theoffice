@@ -6,11 +6,11 @@
 #
 # Usage:
 #   bash scripts/migrate-from-v1.sh \
-#       --old-repo /opt/claude/marveen/marveen \
+#       --old-repo /path/to/old/repo \
 #       --old-home "$HOME/.claude"
 set -euo pipefail
 
-OLD_REPO="/opt/claude/marveen/marveen"
+OLD_REPO="${OLD_REPO:-}"
 OLD_HOME="$HOME/.claude"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -19,6 +19,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 1;;
   esac
 done
+[ -n "$OLD_REPO" ] || { echo "--old-repo (or OLD_REPO) is required" >&2; exit 1; }
 
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TENANT_ROOT="${OFFICE_TENANT_ROOT:-$INSTALL_DIR/tenant}"
@@ -41,7 +42,7 @@ else
 fi
 
 # 3. agents -> tenant/agents/<id>/ : persona AND all working files (specs, docs,
-#    finance/kifli data, tools). EXCLUDE old channel state, old .claude settings,
+#    data folders, tools). EXCLUDE old channel state, old .claude settings,
 #    and HANDOFF.md (stale auto-read). Needs rsync.
 say "Copying agent personas + working files"
 mkdir -p "$TENANT_ROOT/agents"
@@ -97,15 +98,14 @@ chmod -R go-rwx "$TENANT_ROOT/secrets" 2>/dev/null || true
 # 7. reference content folders -> owning agent dirs (archives, read on demand)
 say "Copying reference content folders"
 content_copy(){ [ -d "$OLD_REPO/$1" ] && { mkdir -p "$(dirname "$2")"; cp -rn "$OLD_REPO/$1" "$2" 2>/dev/null; say "  $1 -> $2"; }; }
-content_copy "Pam"                "$TENANT_ROOT/agents/pam/Pam"
-content_copy "budva-26-meetup"    "$TENANT_ROOT/agents/pam/budva-26-meetup"
-content_copy "cookbook"           "$TENANT_ROOT/agents/dwight/cookbook"
-content_copy "Dwight"             "$TENANT_ROOT/agents/dwight/Dwight"
-content_copy "CFO"                "$TENANT_ROOT/agents/cfo/CFO"
-content_copy "Jim"                "$TENANT_ROOT/agents/jim/Jim"
-content_copy "photos botik"       "$TENANT_ROOT/agents/$MAIN_ID/photos-botik"
-content_copy "Uploaded documents" "$TENANT_ROOT/agents/$MAIN_ID/Uploaded-documents"
-content_copy "adatok"             "$TENANT_ROOT/agents/$MAIN_ID/adatok"
+# extra folders to carry over: one "<source folder under the old repo> <destination under the tenant>" pair per line in
+# $OLD_REPO/.office-content-map (optional; blank lines and # comments are ignored)
+if [ -f "$OLD_REPO/.office-content-map" ]; then
+  while read -r src dst; do
+    case "$src" in ""|\#*) continue;; esac
+    content_copy "$src" "$TENANT_ROOT/$dst"
+  done < "$OLD_REPO/.office-content-map"
+fi
 content_copy "agents-archived"    "$TENANT_ROOT/agents-archived"
 
 cat <<'CHECK'

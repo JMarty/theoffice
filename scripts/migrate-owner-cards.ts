@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { getDb, openDb, closeDb } from "../src/db/index.js";
+import { loadConfig } from "../src/config.js";
 
 /**
  * One-time migration of old owner-facing kanban cards into the Owner Board (spec §5b). READ-ONLY on
@@ -27,8 +28,8 @@ interface OldKanbanRow {
 export function migrateOwnerCards(): MigrationResult {
   const db = getDb();
   const rows = db
-    .prepare(`SELECT id, title, description, project, status, created_at, archived_at FROM kanban_cards WHERE assignee='szoszo'`)
-    .all() as OldKanbanRow[];
+    .prepare(`SELECT id, title, description, project, status, created_at, archived_at FROM kanban_cards WHERE assignee=?`)
+    .all(loadConfig().owner.handle ?? "owner") as OldKanbanRow[];
 
   const insert = db.prepare(
     `INSERT INTO owner_cards (id, kind, agent, project, title, body, status, closed_via, source_kanban_id, created_at, updated_at)

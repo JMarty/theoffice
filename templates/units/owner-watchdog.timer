@@ -1,0 +1,11 @@
+[Unit]
+Description=Run owner-watchdog every 2 minutes (delivered-but-silent owner-message recovery)
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=120
+AccuracySec=15s
+Unit=owner-watchdog.service
+
+[Install]
+WantedBy=timers.target

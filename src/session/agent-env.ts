@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { readEnvFile } from "../env.js";
 import type { EngineConfig, AgentDef } from "../types.js";
+import { REPO_ROOT } from "../config.js";
 
 /**
  * Where an agent with `ownAccount: true` keeps its provider login. One directory per agent, inside the
@@ -52,6 +53,7 @@ export function buildAgentEnv(cfg: EngineConfig, agent: AgentDef): Record<string
 
   env.OFFICE_AGENT_ID = agent.id;
   env.OFFICE_TENANT_ROOT = cfg.paths.tenantRoot;
+  env.OFFICE_ROOT = REPO_ROOT; // the engine checkout; shipped skills and templates refer to it as $OFFICE_ROOT
   env.OFFICE_PORT = String(cfg.web.port);
   return env;
 }

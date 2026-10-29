@@ -1,0 +1,7 @@
+{
+  "schedule": "0 5 * * *",
+  "enabled": true,
+  "type": "heartbeat",
+  "skipIfBusy": false,
+  "forceSend": true
+}

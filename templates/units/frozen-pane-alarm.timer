@@ -1,0 +1,8 @@
+[Unit]
+Description=Run frozen-pane-alarm every 2 minutes (well under the 15-min owner-message age threshold)
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+[Install]
+WantedBy=timers.target

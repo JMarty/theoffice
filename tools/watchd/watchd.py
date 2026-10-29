@@ -273,7 +273,7 @@ def _api_base() -> str:
 
 def _bearer() -> str:
     root = os.environ["OFFICE_TENANT_ROOT"]
-    with open(os.path.join(root, "store", ".dashboard-token")) as f:  # perms 600, owner szoszo
+    with open(os.path.join(root, "store", ".dashboard-token")) as f:  # perms 600, owner <engine user>
         return f.read().strip()
 
 

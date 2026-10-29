@@ -41,7 +41,7 @@ const MAX_INPUT_CHARS = 2000;
  * stored, because a stored wrong-length vector is the worst of both worlds: cosine reads 0 against
  * every real vector (semantically dead), yet the row counts as "covered" and the backfill, which
  * selects WHERE embedding IS NULL, never retries it. Leaving the row NULL is honest and self-healing.
- * Found by Toby's adversarial pass on fc077ea, 2026-08-03, before it could bite.
+ * Found by Toby's adversarial pass on fc077ea, before it could bite.
  */
 export const EXPECTED_DIM = Number(process.env.EMBED_DIM ?? 1024);
 /**

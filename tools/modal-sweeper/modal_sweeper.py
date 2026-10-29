@@ -58,6 +58,8 @@ Usage:
 import re
 import os
 import sys
+TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
+ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
 import json
 import time
 import hashlib
@@ -67,7 +69,7 @@ from datetime import datetime, timezone
 
 TMUX = "/usr/bin/tmux"
 SOCKET = "theoffice"
-TENANT = os.environ.get("OFFICE_TENANT_ROOT", "/opt/claude/theoffice/tenant")
+TENANT = os.environ.get("OFFICE_TENANT_ROOT", TENANT)
 LOG = f"{TENANT}/store/modal-sweeper.log"
 STATE = f"{TENANT}/store/.modal-sweeper-alarm-state.json"
 API = "http://127.0.0.1:3430/api/messages"
@@ -159,7 +161,7 @@ def note_permission_prompt(session: str, pane: str) -> None:
     """A permission prompt is up. LEAVE IT ALONE and log the TRANSITION — the first detection, then a
     periodic still-frozen heartbeat — NOT every 20s tick. Alarming is owned by the sibling detect-and-
     alarm tool (store/frozen-pane-alarm.sh, Michael 9265); routing a second alarm here would double-page
-    Szoszo. The record still shows the sweeper saw it and correctly refused, just without the noise."""
+    the owner. The record still shows the sweeper saw it and correctly refused, just without the noise."""
     agent = session.removeprefix("agent-")
     # Key on the pane content so a genuinely NEW/different gate re-logs as a fresh transition.
     key = "det:" + hashlib.sha1((session + "|" + pane[-400:]).encode()).hexdigest()[:16]
@@ -204,7 +206,7 @@ def sweep(dry_run: bool) -> int:
                 log(f"DRY-RUN would-dismiss agent={session} match='❯ 1. Stop and wait for limit to reset' (Enter, Stop-and-wait)")
                 acted += 1
                 continue
-            # Ground-truth capture (Toby 9290): record the exact matched modal lines the FIRST time we
+            # Ground-truth capture: record the exact matched modal lines the FIRST time we
             # act on a real one, so we have real-world proof classify() fires on the live modal — not
             # just on the fixture — and can confirm `❯` is genuinely the selection marker.
             matched = "\n".join(l for l in pane.splitlines() if ("Stop and wait for limit to reset" in l or "Upgrade your plan" in l))
@@ -259,7 +261,7 @@ def self_test() -> int:
     ])
     PERM_BASH = "\n".join([  # a command-approval gate
         "  Do you want to run this command?",
-        "     rm -rf /opt/claude/theoffice/tenant/store",
+        "     rm -rf $OFFICE_TENANT_ROOT/store",
         "   ❯ 1. Yes",
         "     2. No, and tell Claude what to do differently (esc)",
     ])

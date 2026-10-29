@@ -184,7 +184,7 @@ export async function deliverPrompt(socket: string, session: string, prompt: str
   // Confirm the submit actually landed; retry Enter within a bounded budget. decideSubmitFollowup only
   // reports "done" on POSITIVE proof (agent went busy, or the composer is provably empty) — never on the
   // mere absence of a visibly-parked payload, which is how a TALL unsubmitted message whose box scrolled
-  // out of view was silently marked delivered and stranded the agent (dwight + marveen, 2026-08-04). An
+  // out of view was silently marked delivered and stranded the agent. An
   // unproven submit is retried while the pane is safe to Enter, else requeued whole via submit-give-up.
   // STYLED capture is required: the emptiness half of the proof must de-faint the dim ghost hint a
   // successful submit leaves (that hint IS the prompt we sent) so a landed message reads empty, not stuck.
@@ -278,7 +278,7 @@ async function deliverClaude(cfg: EngineConfig, agent: AgentDef, item: QueuedIte
   } else if (item.attempts + 1 >= MAX_DELIVERY_ATTEMPTS) {
     // +1: item.attempts is the PRE-markDelivering snapshot; this failing delivery already burned an
     // attempt, so give up when THIS is the MAX-th try. Without the +1 a row failed on its 6th attempt
-    // against a max of 5 (the off-by-one Toby flagged).
+    // against a max of 5.
     markFailed(item.id, res.reason ?? "unknown");
     logger.warn({ id: item.id, agent: item.agent_id, reason: res.reason }, "delivery failed (max attempts)");
   } else {

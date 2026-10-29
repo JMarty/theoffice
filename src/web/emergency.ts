@@ -6,7 +6,7 @@
 //   2. CLEAR  — delete the active inbound queue and retire the stuck bus records to a terminal state,
 //               so nothing is re-injected on restart and the storm cannot immediately re-ignite.
 //   3. RESTART— kill + relaunch every enabled agent (fresh panes on the isolated tmux server).
-//   4. BRIEF  — enqueue a manual message to the main agent (Michael/marveen) explaining what happened,
+//   4. BRIEF  — enqueue a manual message to the main agent explaining what happened,
 //               pointing at the saved backup, and telling him to summarise it to the owner on Slack and
 //               then STAND BY for instructions — WITHOUT blasting the other agents (that caused the storm).
 //
@@ -258,7 +258,7 @@ WHAT THE SYSTEM ALREADY DID — no data lost
 3. Restarted all ${d.restarted.length} enabled agents (clean idle panes). The BUS_BREAKER circuit breaker is active.
 
 YOUR TASK NOW
-a) READ ${backupDir}/QUEUE-DIGEST.md (open the JSON dumps for detail). Note any REAL in-flight work that got cleared so nothing important is silently dropped (owner messages, watering/rental/finance items, etc.).
+a) READ ${backupDir}/QUEUE-DIGEST.md (open the JSON dumps for detail). Note any REAL in-flight work that got cleared so nothing important is silently dropped (owner messages, scheduled or finance items, etc.).
 b) Send ${owner} a SHORT plain-language summary on Slack (your normal owner DM): (1) what happened / root cause, (2) that the full queue is saved at ${backupDir} and the queue is clean + all agents restarted, (3) a brief bulleted list of anything still needing a decision or that must be redone, (4) that you are standing by for instructions.
 c) Then STOP and WAIT for ${owner}'s instructions.
 

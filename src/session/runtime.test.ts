@@ -60,7 +60,7 @@ describe("runtime registry", () => {
     expect(models).toContain("claude-opus-5");
     expect(models).toContain("claude-fable-5");
     expect(models).toContain("claude-sonnet-5");
-    // opus 4.8 stays: live agents (home, zeus) still run on it
+    // opus 4.8 stays in the registry for agents still pinned to it
     expect(models).toContain("claude-opus-4-8");
     // the dated snapshot id must not come back — offer the alias
     expect(models).toContain("claude-haiku-4-5");
@@ -104,7 +104,7 @@ describe("frameForDelivery", () => {
     source: "channel",
     prompt: "hi",
     reply_channel: "C123",
-    reply_user: "U0BA6GF2VTJ",
+    reply_user: "U0TESTOWNER1",
     attempts: 0,
     ...over,
   });
