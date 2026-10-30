@@ -46,9 +46,10 @@ describe("runtime registry", () => {
     expect(isKnownRuntime(undefined)).toBe(false);
   });
 
-  it("advertises claude --model ids and no per-launch model for codex", () => {
+  it("advertises claude --model ids and the codex catalog slugs", () => {
     expect(getRuntime("claude").models.length).toBeGreaterThan(0);
-    expect(getRuntime("codex").models.length).toBe(0);
+    expect(getRuntime("codex").models).toContain("gpt-5.5");
+    for (const m of getRuntime("codex").models) expect(m).toMatch(/^[a-z0-9.-]+$/);
   });
 
   it("advertises the current claude models, aliases not dated snapshots", () => {
@@ -80,11 +81,10 @@ describe("runtime registry", () => {
     expect(models).toContain("gemini-3.1-pro-high");
   });
 
-  it("advertises effort levels for claude only", () => {
+  it("advertises each provider's own effort levels", () => {
     expect([...getRuntime("claude").efforts]).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    // non-claude providers have no equivalent knob; the UI hides the control when the list is empty
-    expect(getRuntime("codex").efforts.length).toBe(0);
-    expect(getRuntime("gemini").efforts.length).toBe(0);
+    expect([...getRuntime("gemini").efforts]).toEqual(["low", "medium", "high", "xhigh", "max"]); // agy --effort
+    expect([...getRuntime("codex").efforts]).toEqual(["low", "medium", "high", "xhigh"]); // no "max" in codex
   });
 
   it("exposes efforts through listRuntimes for the dashboard", () => {

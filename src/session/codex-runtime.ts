@@ -11,6 +11,7 @@ import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, M
 import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
+import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, contextTokensOf, type TurnUsage } from "./exec-sessions.js";
 
 /**
  * Codex runtime path (Pete-on-Codex pilot). A `runtime: "codex"` agent does NOT run a persistent TUI
@@ -112,7 +113,13 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   const prompt = frameForDelivery(item);
   // unattended posture, same spirit as claude's --dangerously-skip-permissions (the box is the boundary):
   // no approval prompts, no sandbox restriction so the agent can office-say / git / write the vault.
-  const args = ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", prompt];
+  const flags = ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+  if (agent.model && agent.model !== "default") flags.push("-m", agent.model);
+  if (agent.effort && codexRuntime.efforts.includes(agent.effort)) flags.push("-c", `model_reasoning_effort="${agent.effort}"`);
+  // Continuity: `codex exec resume <thread_id>` continues the stored conversation (cleared by the context
+  // roll-over or a reset). Same flags are accepted after `resume` (codex exec resume --help).
+  const resumeId = sessionToResume(agent.id, "codex");
+  const args = resumeId ? ["exec", "resume", ...flags, resumeId, prompt] : ["exec", ...flags, prompt];
 
   // Codex P3 spawn-safety: claim in-flight + charge the attempt ONLY after the subprocess actually spawned.
   // If spawn() throws synchronously (bad PATH, ENOMEM) we must NOT leave inFlight set (that would wedge the
@@ -137,6 +144,8 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
 
   let sawCompleted = false;
   let sawUsageLimit = false;
+  let threadId: string | null = null;
+  let turnUsage: TurnUsage | null = null;
   let buf = "";
   let settled = false; // latch: 'error' is usually FOLLOWED by 'close' — book the terminal outcome exactly once
   let timedOut = false;
@@ -166,6 +175,8 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
     }
     const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts });
     if (outcome === "delivered") {
+      if (turnUsage) recordUsage(agent.id, threadId, turnUsage);
+      if (threadId) saveSession(agent.id, "codex", threadId, turnUsage ? contextTokensOf(turnUsage) : 0);
       markDelivered(item.id);
       recordInbound(item.agent_id, item.reply_channel, item.prompt);
       logger.info({ id: item.id, agent: agent.id }, "codex prompt delivered (turn.completed)");
@@ -173,6 +184,12 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       cooldownUntil.set(agent.id, Date.now() + USAGE_BACKOFF_MS);
       requeueNoPenalty(item.id);
       logger.warn({ id: item.id, agent: agent.id, code, backoffMin: USAGE_BACKOFF_MS / 60_000 }, "codex usage cap -> holding (no attempt charged)");
+    } else if (resumeId && outcome !== "failed") {
+      // A failed RESUME is most likely a stale/unknown thread id: forget it so the retry starts a new
+      // conversation, and refund the attempt (the message is not at fault).
+      clearSession(agent.id);
+      requeueNoPenalty(item.id);
+      logger.warn({ id: item.id, agent: agent.id, code }, "codex resume failed -> conversation reset, retrying fresh (no attempt charged)");
     } else if (outcome === "failed") {
       markFailed(item.id, errMsg ?? `exit ${code}, turn.completed=${sawCompleted}`);
       logger.warn({ id: item.id, agent: agent.id, code }, "codex delivery failed (max attempts)");
@@ -190,7 +207,12 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       buf = buf.slice(nl + 1);
       if (!line) continue;
       try {
-        if (JSON.parse(line)?.type === "turn.completed") sawCompleted = true;
+        const ev = JSON.parse(line);
+        if (ev?.type === "thread.started" && typeof ev.thread_id === "string") threadId = ev.thread_id;
+        if (ev?.type === "turn.completed") {
+          sawCompleted = true;
+          turnUsage = usageFromCodex(ev.usage);
+        }
       } catch {
         /* non-JSON line, ignore */
       }
@@ -209,9 +231,11 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
 export const codexRuntime: Runtime = {
   id: "codex",
   label: "OpenAI Codex (GPT-5.5)",
-  // Codex uses the signed-in ChatGPT account's model, not a per-launch flag, so no selectable list.
-  models: [],
-  efforts: [],
+  // Selectable `-m` values: the visible entries of `codex debug models` (codex-cli 0.139.0, 2026-10-30).
+  // Empty agent.model -> the signed-in account's default.
+  models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+  // `-c model_reasoning_effort=...`; the catalog's supported_reasoning_levels for every listed model.
+  efforts: ["low", "medium", "high", "xhigh"],
   launch: launchCodexHolder,
   isBusy: isCodexBusy,
   deliver: deliverCodexPrompt,

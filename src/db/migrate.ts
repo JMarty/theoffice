@@ -178,6 +178,23 @@ export const MIGRATIONS: Migration[] = [
           ALTER TABLE task_runs ADD COLUMN fired_at INTEGER;
           CREATE INDEX idx_task_runs_open ON task_runs(completed_at, ts);`,
   },
+  {
+    version: 10,
+    name: "exec-runtime usage + conversation continuity",
+    // codex/gemini run one CLI subprocess per prompt: thinking_tokens extends token_usage (already used for
+    // per-turn rows) and runtime_sessions remembers the conversation id so the next turn resumes it instead of
+    // starting blank. One row per agent; last_context_tokens drives the roll-over and the estimated fill %.
+    // Migration-only (Model A), never SCHEMA_SQL.
+    sql: `ALTER TABLE token_usage ADD COLUMN thinking_tokens INTEGER NOT NULL DEFAULT 0;
+          CREATE TABLE runtime_sessions (
+            agent_id            TEXT PRIMARY KEY,
+            runtime             TEXT NOT NULL,
+            session_id          TEXT NOT NULL,
+            turns               INTEGER NOT NULL DEFAULT 0,
+            last_context_tokens INTEGER NOT NULL DEFAULT 0,
+            updated_at          INTEGER NOT NULL DEFAULT (unixepoch())
+          );`,
+  },
 ];
 
 /** Highest known schema version (the baseline, or the max migration version). */

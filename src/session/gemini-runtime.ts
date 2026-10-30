@@ -11,6 +11,7 @@ import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, M
 import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
+import { sessionToResume, saveSession, clearSession, recordUsage, usageFromGemini, contextTokensOf } from "./exec-sessions.js";
 
 /**
  * Gemini runtime — drives an agent on Google's Antigravity CLI (`agy`), the successor to the Gemini CLI
@@ -120,11 +121,17 @@ export function deliverGeminiPrompt(cfg: EngineConfig, agent: AgentDef, item: Qu
   // Flags BEFORE the prompt value (Go flag parsing stops at the first non-flag arg). Model selection is
   // left to the agent's signed-in default unless agent.model overrides it. Unattended posture mirrors the
   // claude/codex paths: --dangerously-skip-permissions so the agent can office-say / git / write the vault.
-  const args = ["--dangerously-skip-permissions", "--print-timeout", PRINT_TIMEOUT];
+  // --output-format json: one JSON object on stdout with conversation_id + usage (verified live 2026-10-30).
+  const args = ["--dangerously-skip-permissions", "--print-timeout", PRINT_TIMEOUT, "--output-format", "json"];
   if (agent.model && agent.model !== "default") args.push("--model", agent.model);
+  if (agent.effort && geminiRuntime.efforts.includes(agent.effort)) args.push("--effort", agent.effort);
+  // Continuity: resume the agent's stored conversation (cleared by the context roll-over or a reset).
+  const resumeId = sessionToResume(agent.id, "gemini");
+  if (resumeId) args.push("--conversation", resumeId);
   args.push("--print", prompt);
 
   let sawUsageLimit = false;
+  let outBuf = "";
   const scan = (s: string) => {
     if (USAGE_LIMIT_RE.test(s)) sawUsageLimit = true;
   };
@@ -173,6 +180,7 @@ export function deliverGeminiPrompt(cfg: EngineConfig, agent: AgentDef, item: Qu
     }
     const outcome = decideGeminiOutcome({ code, sawUsageLimit, attempts: item.attempts });
     if (outcome === "delivered") {
+      bookTurn(agent.id, outBuf);
       markDelivered(item.id);
       recordInbound(item.agent_id, item.reply_channel, item.prompt);
       logger.info({ id: item.id, agent: agent.id }, "gemini prompt delivered (clean exit)");
@@ -180,6 +188,12 @@ export function deliverGeminiPrompt(cfg: EngineConfig, agent: AgentDef, item: Qu
       cooldownUntil.set(agent.id, Date.now() + USAGE_BACKOFF_MS);
       requeueNoPenalty(item.id);
       logger.warn({ id: item.id, agent: agent.id, code, backoffMin: USAGE_BACKOFF_MS / 60_000 }, "gemini usage cap -> holding (no attempt charged)");
+    } else if (resumeId && outcome !== "failed") {
+      // A failed RESUME is most likely a stale/unknown conversation id: forget it so the retry starts a new
+      // conversation, and refund the attempt (the message is not at fault).
+      clearSession(agent.id);
+      requeueNoPenalty(item.id);
+      logger.warn({ id: item.id, agent: agent.id, code }, "gemini resume failed -> conversation reset, retrying fresh (no attempt charged)");
     } else if (outcome === "failed") {
       markFailed(item.id, errMsg ?? `exit ${code}`);
       logger.warn({ id: item.id, agent: agent.id, code }, "gemini delivery failed (max attempts)");
@@ -189,10 +203,31 @@ export function deliverGeminiPrompt(cfg: EngineConfig, agent: AgentDef, item: Qu
     }
   };
 
-  child.stdout.on("data", (d: Buffer) => scan(d.toString()));
+  child.stdout.on("data", (d: Buffer) => {
+    const t = d.toString();
+    if (outBuf.length < 4_000_000) outBuf += t;
+    scan(t);
+  });
   child.stderr.on("data", (d: Buffer) => scan(d.toString()));
   child.on("close", (code) => finish(code));
   child.on("error", (err) => finish(null, `spawn error: ${String((err as Error).message ?? err)}`));
+}
+
+/**
+ * Book one finished turn: usage row + remember the conversation id. The stdout is a single JSON object
+ * ({conversation_id, usage:{...}}); anything unparsable is ignored (the turn still counts as delivered).
+ */
+export function bookTurn(agentId: string, stdout: string): void {
+  let o: any;
+  try {
+    o = JSON.parse(stdout.trim());
+  } catch {
+    return;
+  }
+  const usage = usageFromGemini(o?.usage);
+  const cid = typeof o?.conversation_id === "string" && o.conversation_id ? o.conversation_id : null;
+  if (usage) recordUsage(agentId, cid, usage);
+  if (cid) saveSession(agentId, "gemini", cid, usage ? contextTokensOf(usage) : 0);
 }
 
 export const geminiRuntime: Runtime = {
@@ -216,7 +251,8 @@ export const geminiRuntime: Runtime = {
     "claude-opus-4-6-thinking",
     "gpt-oss-120b-medium",
   ],
-  efforts: [],
+  // `agy --effort` accepts low|medium|high|xhigh|max (agy --help, 2026-10-30).
+  efforts: ["low", "medium", "high", "xhigh", "max"],
   launch: launchGeminiHolder,
   isBusy: isGeminiBusy,
   deliver: deliverGeminiPrompt,
