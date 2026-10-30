@@ -14,8 +14,13 @@ const logger = log("exec-sessions");
 /** Approximate context windows (tokens), used only for the dashboard's ESTIMATED fill % and the roll-over. */
 export const CONTEXT_WINDOW: Record<string, number> = {
   codex: 272_000, // `codex debug models`: context_window for the gpt-5.x family
-  gemini: 1_000_000, // Gemini 3.x family; agy does not report the window, so this is an estimate
+  gemini: 256_000, // what agy itself reports for gemini-3.8-flash (its context meter's denominator)
 };
+/**
+ * When the real context size could not be read (null reading), roll over by turn count instead: blind
+ * continuity forever would eventually overflow the window. Deliberately conservative.
+ */
+export const UNKNOWN_CONTEXT_MAX_TURNS = 20;
 /** Start a fresh conversation once the last turn's context fill passes this share of the window. */
 export const ROLLOVER_FRACTION = 0.7;
 
@@ -29,7 +34,10 @@ export interface TurnUsage {
 export interface StoredSession {
   sessionId: string;
   turns: number;
+  /** size of the context after the last turn (prompt of the last model call); 0 = could not be measured */
   lastContextTokens: number;
+  /** the CLI-reported window; 0 = use CONTEXT_WINDOW */
+  contextWindow: number;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
@@ -52,10 +60,6 @@ export function usageFromCodex(u: any): TurnUsage | null {
   return { input, output: num(u.output_tokens), cacheRead: cached, thinking: num(u.reasoning_output_tokens) };
 }
 
-/** Tokens the model had in context on this turn (what the next turn will carry at least). */
-export function contextTokensOf(u: TurnUsage): number {
-  return u.input + u.cacheRead;
-}
 
 export function recordUsage(agentId: string, sessionId: string | null, u: TurnUsage): void {
   try {
@@ -73,27 +77,28 @@ export function recordUsage(agentId: string, sessionId: string | null, u: TurnUs
 export function getSession(agentId: string, runtime: string): StoredSession | null {
   try {
     const r = getDb()
-      .prepare(`SELECT session_id, turns, last_context_tokens FROM runtime_sessions WHERE agent_id = ? AND runtime = ?`)
-      .get(agentId, runtime) as { session_id: string; turns: number; last_context_tokens: number } | undefined;
-    return r ? { sessionId: r.session_id, turns: r.turns, lastContextTokens: r.last_context_tokens } : null;
+      .prepare(`SELECT session_id, turns, last_context_tokens, context_window FROM runtime_sessions WHERE agent_id = ? AND runtime = ?`)
+      .get(agentId, runtime) as { session_id: string; turns: number; last_context_tokens: number; context_window: number } | undefined;
+    return r ? { sessionId: r.session_id, turns: r.turns, lastContextTokens: r.last_context_tokens, contextWindow: r.context_window } : null;
   } catch {
     return null;
   }
 }
 
-export function saveSession(agentId: string, runtime: string, sessionId: string, contextTokens: number): void {
+export function saveSession(agentId: string, runtime: string, sessionId: string, contextTokens: number, contextWindow = 0): void {
   try {
     getDb()
       .prepare(
-        `INSERT INTO runtime_sessions (agent_id, runtime, session_id, turns, last_context_tokens, updated_at)
-         VALUES (?, ?, ?, 1, ?, unixepoch())
+        `INSERT INTO runtime_sessions (agent_id, runtime, session_id, turns, last_context_tokens, context_window, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?, unixepoch())
          ON CONFLICT(agent_id) DO UPDATE SET
            turns = CASE WHEN runtime_sessions.session_id = excluded.session_id AND runtime_sessions.runtime = excluded.runtime
                         THEN runtime_sessions.turns + 1 ELSE 1 END,
            runtime = excluded.runtime, session_id = excluded.session_id,
-           last_context_tokens = excluded.last_context_tokens, updated_at = unixepoch()`,
+           last_context_tokens = excluded.last_context_tokens, context_window = excluded.context_window,
+           updated_at = unixepoch()`,
       )
-      .run(agentId, runtime, sessionId, contextTokens);
+      .run(agentId, runtime, sessionId, contextTokens, contextWindow);
   } catch (err) {
     logger.warn({ agent: agentId, err: String((err as Error).message ?? err) }, "session not saved");
   }
@@ -115,9 +120,14 @@ export function clearSession(agentId: string): boolean {
 export function sessionToResume(agentId: string, runtime: string): string | null {
   const s = getSession(agentId, runtime);
   if (!s) return null;
-  const win = CONTEXT_WINDOW[runtime];
-  if (win && s.lastContextTokens > win * ROLLOVER_FRACTION) {
+  const win = s.contextWindow || CONTEXT_WINDOW[runtime];
+  if (s.lastContextTokens > 0 && win && s.lastContextTokens > win * ROLLOVER_FRACTION) {
     logger.info({ agent: agentId, runtime, ctx: s.lastContextTokens, win }, "context past roll-over -> starting a new conversation");
+    clearSession(agentId);
+    return null;
+  }
+  if (s.lastContextTokens <= 0 && s.turns >= UNKNOWN_CONTEXT_MAX_TURNS) {
+    logger.info({ agent: agentId, runtime, turns: s.turns }, "context size unknown and many turns -> starting a new conversation");
     clearSession(agentId);
     return null;
   }
@@ -127,8 +137,8 @@ export function sessionToResume(agentId: string, runtime: string): string | null
 /** Estimated context fill % for the dashboard (null when the agent has no stored conversation). */
 export function estimatedContextPct(agentId: string, runtime: string): number | null {
   const s = getSession(agentId, runtime);
-  const win = CONTEXT_WINDOW[runtime];
-  if (!s || !win) return null;
+  const win = s?.contextWindow || CONTEXT_WINDOW[runtime];
+  if (!s || !win || s.lastContextTokens <= 0) return null; // not measured -> "n/a", never a made-up figure
   return Math.min(100, Math.round((s.lastContextTokens / win) * 100));
 }
 

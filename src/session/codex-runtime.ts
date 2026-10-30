@@ -11,8 +11,9 @@ import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, M
 import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
+import { readCodexContext } from "./exec-context.js";
 import { createModelCatalog, parseCodexModels, runCli } from "./model-catalog.js";
-import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, contextTokensOf, alertConfigFailure, CONFIG_ERROR_RE, type TurnUsage } from "./exec-sessions.js";
+import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, alertConfigFailure, CONFIG_ERROR_RE, type TurnUsage } from "./exec-sessions.js";
 
 /**
  * Codex runtime path (Pete-on-Codex pilot). A `runtime: "codex"` agent does NOT run a persistent TUI
@@ -181,7 +182,11 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
     const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts, configError: !!configError });
     if (outcome === "delivered") {
       if (turnUsage) recordUsage(agent.id, threadId, turnUsage);
-      if (threadId) saveSession(agent.id, "codex", threadId, turnUsage ? contextTokensOf(turnUsage) : 0);
+      if (threadId) {
+        // turn usage may be summed over the turn's model calls; the context size is the last call's prompt
+        const ctx = readCodexContext(threadId);
+        saveSession(agent.id, "codex", threadId, ctx?.tokens ?? 0, ctx?.window ?? 0);
+      }
       markDelivered(item.id);
       recordInbound(item.agent_id, item.reply_channel, item.prompt);
       logger.info({ id: item.id, agent: agent.id }, "codex prompt delivered (turn.completed)");

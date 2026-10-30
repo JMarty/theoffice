@@ -8,7 +8,6 @@ vi.mock("../db/index.js", () => ({ getDb: () => db }));
 import {
   usageFromGemini,
   usageFromCodex,
-  contextTokensOf,
   recordUsage,
   saveSession,
   getSession,
@@ -16,6 +15,7 @@ import {
   sessionToResume,
   estimatedContextPct,
   CONTEXT_WINDOW,
+  UNKNOWN_CONTEXT_MAX_TURNS,
 } from "./exec-sessions.js";
 import { runMigrations } from "../db/migrate.js";
 import { SCHEMA_SQL } from "../db/schema.js";
@@ -36,7 +36,6 @@ describe("usage parsing", () => {
   it("codex: splits cached tokens out of input_tokens", () => {
     const u = usageFromCodex({ input_tokens: 1000, cached_input_tokens: 400, output_tokens: 50, reasoning_output_tokens: 20 });
     expect(u).toEqual({ input: 600, output: 50, cacheRead: 400, thinking: 20 });
-    expect(contextTokensOf(u!)).toBe(1000);
   });
   it("garbage usage -> null / zeros, never throws", () => {
     expect(usageFromGemini(undefined)).toBeNull();
@@ -55,9 +54,9 @@ describe("usage + sessions in the db (migration v10)", () => {
   it("saveSession counts turns for the same conversation and restarts the count for a new id", () => {
     saveSession("a", "gemini", "c1", 100);
     saveSession("a", "gemini", "c1", 200);
-    expect(getSession("a", "gemini")).toEqual({ sessionId: "c1", turns: 2, lastContextTokens: 200 });
+    expect(getSession("a", "gemini")).toEqual({ sessionId: "c1", turns: 2, lastContextTokens: 200, contextWindow: 0 });
     saveSession("a", "gemini", "c2", 50);
-    expect(getSession("a", "gemini")).toEqual({ sessionId: "c2", turns: 1, lastContextTokens: 50 });
+    expect(getSession("a", "gemini")).toEqual({ sessionId: "c2", turns: 1, lastContextTokens: 50, contextWindow: 0 });
   });
 
   it("a session stored for another runtime is not resumed", () => {
@@ -83,10 +82,31 @@ describe("usage + sessions in the db (migration v10)", () => {
     expect(getSession("a", "codex")).toBeNull();
   });
 
-  it("estimated fill % comes from the last turn's tokens", () => {
+  it("estimated fill % comes from the measured context, against the CLI-reported window when known", () => {
     saveSession("a", "codex", "t1", Math.floor(CONTEXT_WINDOW.codex! / 4));
     expect(estimatedContextPct("a", "codex")).toBe(25);
+    saveSession("g", "gemini", "c1", 100_000, 200_000);
+    expect(estimatedContextPct("g", "gemini")).toBe(50);
     expect(estimatedContextPct("none", "codex")).toBeNull();
+  });
+
+  it("an unmeasured context (0) shows n/a, never a made-up percentage", () => {
+    saveSession("a", "gemini", "c1", 0);
+    expect(estimatedContextPct("a", "gemini")).toBeNull();
+  });
+
+  it("unmeasured context rolls over by turn count instead", () => {
+    for (let i = 0; i < UNKNOWN_CONTEXT_MAX_TURNS - 1; i++) saveSession("a", "gemini", "c1", 0);
+    expect(sessionToResume("a", "gemini")).toBe("c1");
+    saveSession("a", "gemini", "c1", 0);
+    expect(sessionToResume("a", "gemini")).toBeNull();
+  });
+
+  it("a big SUMMED turn usage no longer forces a roll-over: only the measured context counts", () => {
+    // regression: heat reported 3.5M summed input for a ~120k context and rolled over after every tool turn
+    saveSession("h", "gemini", "c1", 122_787, 256_000);
+    expect(sessionToResume("h", "gemini")).toBe("c1");
+    expect(estimatedContextPct("h", "gemini")).toBe(48);
   });
 });
 

@@ -78,7 +78,7 @@ describe("codex continuity + flags", () => {
     );
     child.emit("close", 0);
     expect(store.recordUsage).toHaveBeenCalledWith(a.id, "T9", { input: 60, output: 7, cacheRead: 40, thinking: 2 });
-    expect(store.saveSession).toHaveBeenCalledWith(a.id, "codex", "T9", 100);
+    expect(store.saveSession).toHaveBeenCalledWith(a.id, "codex", "T9", 0, 0); // no rollout file -> unmeasured, not the summed usage
   });
 
   it("a failed resume resets the conversation and retries without charging an attempt", () => {
@@ -115,7 +115,7 @@ describe("gemini continuity + flags", () => {
     deliverGeminiPrompt(cfg, a as never, item(a));
     child.stdout.emit("data", Buffer.from('{"conversation_id":"C7","status":"SUCCESS","usage":{"input_tokens":5,"output_tokens":2,"thinking_tokens":1,"cache_read_tokens":0}}'));
     child.emit("close", 0);
-    expect(store.saveSession).toHaveBeenCalledWith(a.id, "gemini", "C7", 5);
+    expect(store.saveSession).toHaveBeenCalledWith(a.id, "gemini", "C7", 0, 0); // no conversation db -> unmeasured
     expect(q.markDelivered).toHaveBeenCalledTimes(1);
   });
 
