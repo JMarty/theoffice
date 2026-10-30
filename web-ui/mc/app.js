@@ -9,21 +9,64 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let TOKEN = localStorage.getItem("office_token") || "";
 
 // ---------------- API ----------------
+// A NetError means "the engine is not answering" (connection refused, a proxy 502/503/504 while it restarts, an HTML error page instead of JSON):
+// the UI shows "reconnecting" and retries; it must never be mistaken for a bad token.
+class NetError extends Error { constructor(m) { super(m || "engine unreachable"); this.name = "NetError"; } }
+async function rawFetch(path, init) {
+  let r;
+  try { r = await fetch(path, init); } catch (e) { throw new NetError(); }
+  if (r.status === 502 || r.status === 503 || r.status === 504) throw new NetError();
+  return r;
+}
+async function readJson(r) {
+  try { return await r.json(); } catch (e) { throw new NetError("not a JSON answer (proxy error page?)"); }
+}
 async function api(path) {
-  const r = await fetch(path, { headers: { authorization: `Bearer ${TOKEN}` } });
+  const r = await rawFetch(path, { headers: { authorization: `Bearer ${TOKEN}` } });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
-  return r.json();
+  return readJson(r);
 }
 async function post(path, body) {
-  const r = await fetch(path, {
+  const r = await rawFetch(path, {
     method: "POST",
     headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify(body || {}),
   });
   if (r.status === 429) throw new Error(`rate limited — retry after ${r.headers.get("retry-after")}s`);
   if (r.status === 401) throw new Error("unauthorized — check the token");
-  return r.json();
+  return readJson(r);
+}
+
+// ---------------- reconnecting (engine restart) ----------------
+let RECONNECTING = false, RC_TIMER = null, RC_DELAY = 2000, USAGE_AT = 0;
+// A visible "loading" state from the first moment: the page used to stay completely blank until the first API round trip finished (10+ s when the engine was busy).
+function setLoading(on) {
+  const screen = $("#reconnect-screen"); if (!screen) return;
+  const msg = screen.querySelector(".rc-msg"), sub = $("#rc-sub");
+  if (on) { if (msg) msg.textContent = "Loading Mission Control…"; if (sub) sub.textContent = "Connecting to the engine. This can take a few seconds when it is busy."; screen.classList.remove("hidden"); }
+  else { screen.classList.add("hidden"); if (msg) msg.textContent = "Reconnecting to the engine…"; if (sub) sub.textContent = "It is restarting or unreachable. This page retries by itself."; }
+}
+function setReconnecting(on, firstLoad) {
+  RECONNECTING = on;
+  const bar = $("#reconnect-bar"), screen = $("#reconnect-screen");
+  if (on) {
+    if (firstLoad) { screen && screen.classList.remove("hidden"); $("#gate") && $("#gate").classList.add("hidden"); }
+    else bar && bar.classList.remove("hidden");
+    const pill = $("#connpill"); if (pill) { pill.classList.add("bad"); const b = pill.querySelector("b"); if (b) b.textContent = "reconnecting…"; }
+  } else {
+    bar && bar.classList.add("hidden"); screen && screen.classList.add("hidden");
+    const pill = $("#connpill"); if (pill) { pill.classList.remove("bad"); const b = pill.querySelector("b"); if (b) b.textContent = "connected"; }
+    RC_DELAY = 2000; RC_FAILS = 0;
+  }
+}
+let RC_FAILS = 0;
+function scheduleRetry(fn) {
+  clearTimeout(RC_TIMER);
+  // after ~6 failed tries the engine may not be restarting at all: an expired Cloudflare Access login also answers with an HTML page, which lands here
+  if (++RC_FAILS >= 6) { const sub = $("#rc-sub"); if (sub) sub.textContent = "Still not reachable. If this address asks you to sign in, open it in a normal tab, sign in again, then come back."; }
+  RC_TIMER = setTimeout(fn, RC_DELAY);
+  RC_DELAY = Math.min(RC_DELAY * 1.5, 10000); // 2s, 3s, 4.5s ... capped at 10s: back quickly after a restart, gentle if it stays down
 }
 
 // ---------------- format helpers ----------------
@@ -160,20 +203,26 @@ function activityCopy(a, st) {
 }
 
 async function refreshData() {
-  const [agents, overview, usage, host, schedules, runtimes, auth] = await Promise.all([
+  // /api/usage is the slow call (transcript scan, ~10 s cold): it must NOT hold up the first paint, so it is fetched on the side and fills in when it arrives
+  // ...and only every 5 minutes: on an engine that still computes it synchronously, a 15 s poll per open tab kept the whole API blocked ~2/3 of the time.
+  if (Date.now() - USAGE_AT > 300000) {
+    USAGE_AT = Date.now();
+    setTimeout(() => api("/api/usage?window=24h").then((u) => { USAGE = Object.fromEntries((u.usage || []).map((x) => [x.id, x])); if (CONNECTED) { renderStrip(); if (CURRENT_TAB === "agents") showTab("agents"); } }).catch(() => { USAGE_AT = 0; }), 3000);
+  }
+  const [agents, overview, host, schedules, runtimes, auth, freeze] = await Promise.all([
     api("/api/agents"),
     api("/api/overview").catch(() => ({})),
-    api("/api/usage?window=24h").catch(() => ({ usage: [] })),
     api("/api/host").catch(() => ({})),
     api("/api/schedules").catch(() => ([])),
     api("/api/runtimes").catch(() => null),
     api("/api/auth/health").catch(() => null),
+    api("/api/fleet/freeze").catch(() => null),
   ]);
   if (auth) AUTH = auth;
+  if (freeze) FREEZE = freeze;
   AGENTLIST = agents;
   AGENTS = Object.fromEntries(agents.map((a) => [a.id, a]));
   OVERVIEW = overview || {};
-  USAGE = Object.fromEntries((usage.usage || []).map((u) => [u.id, u]));
   HOST = host || {};
   // Mission Control is the configured default (web.dashboard = "mc"): "/" redirects here, so the
   // Classic switch would just bounce back — hide it.
@@ -194,6 +243,53 @@ function seg(group, opts) {
   return `<div class="seg">` + opts.map(([v, l]) =>
     `<button class="${PREFS[group] === v ? "active" : ""}" onclick="setPref('${group}','${v}')">${l}</button>`).join("") + `</div>`;
 }
+// ---------------- fleet freeze (the red button) ----------------
+// Anyone on the dashboard can FREEZE. Only the OWNER can thaw: the Unfreeze button sends NO bearer token, only the Cloudflare Access login of the
+// owner (the request must come through the office.* address, signed in with the owner's email); agents hold the bearer but never that login.
+let FREEZE = { frozen: false };
+function fmtFreezeSince(at) { return at ? new Date(at * 1000).toLocaleString() : ""; }
+function renderFreezeBanner() {
+  const host = $("#freeze-banner");
+  if (!host) return;
+  if (!FREEZE || !FREEZE.frozen) { host.innerHTML = ""; host.style.display = "none"; return; }
+  host.style.display = "block";
+  host.innerHTML = `
+    <div style="background:#7f1d1d;border:1px solid #dc2626;border-radius:12px;padding:12px 14px;margin:0 0 12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:#fff">
+      <div style="font-size:20px;line-height:1">🛑</div>
+      <div style="flex:1;min-width:220px">
+        <div style="font-weight:800;font-size:14px">FLEET FROZEN: no Claude agent can run a tool, nothing new is delivered, no scheduled work starts</div>
+        <div style="font-size:12px;opacity:.9;margin-top:2px">${esc(FREEZE.reason || "")}${FREEZE.by ? " · by " + esc(FREEZE.by) : ""}${FREEZE.at ? " · since " + esc(fmtFreezeSince(FREEZE.at)) : ""}</div>
+      </div>
+      <button onclick="unfreezeFleet(this)" style="background:#fff;color:#111;border:0;border-radius:9px;padding:10px 14px;font-weight:800;font-size:13px;cursor:pointer">▶ Unfreeze (owner confirms)</button>
+    </div>`;
+}
+async function refreshFreeze() {
+  try { FREEZE = await api("/api/fleet/freeze"); } catch (e) { /* keep the last known state */ }
+  renderFreezeBanner();
+}
+async function freezeFleet(btn) {
+  const reason = prompt("Freeze the whole fleet?\n\nNo Claude agent can run a tool, nothing new is delivered and no scheduled work starts until the owner unfreezes.\n\nReason (optional):");
+  if (reason === null) return;
+  btn.disabled = true;
+  try { await post("/api/fleet/freeze", { reason: reason.trim() || "frozen from the dashboard", actor: "dashboard" }); } catch (e) { alert("Freeze failed: " + e.message); }
+  btn.disabled = false;
+  await refreshFreeze();
+}
+async function unfreezeFleet(btn) {
+  btn.disabled = true;
+  try {
+    // credentials: include so the Cloudflare Access cookie goes along; deliberately NO Authorization header (the bearer is not accepted here)
+    const r = await fetch("/api/fleet/unfreeze", { method: "POST", credentials: "include" });
+    if (r.status === 403) {
+      // No owner Cloudflare Access login on this address (e.g. the LAN one): ask the owner to confirm on Slack instead; the fleet thaws only when he replies.
+      const q = await post("/api/fleet/unfreeze-request", {});
+      alert(q.sent ? "Asked the owner on Slack to confirm. The fleet thaws when he replies 'unfreeze fleet'." : "Not sent: " + (q.reason || "unknown reason"));
+    } else if (!r.ok) alert("Unfreeze failed (" + r.status + ")");
+  } catch (e) { alert("Unfreeze failed: " + e.message); }
+  btn.disabled = false;
+  await refreshFreeze();
+}
+
 function renderHeader() {
   $("#hwrap").innerHTML = `
     <div class="brand">
@@ -201,6 +297,10 @@ function renderHeader() {
       <div class="wordmark"><div class="t1">The Office</div><div class="t2">Mission Control</div></div>
     </div>
     <div class="controls">
+      <button id="freeze-btn" onclick="freezeFleet(this)" title="Freeze the fleet: no agent runs a tool, nothing new is delivered, no scheduled work starts. Only the owner can unfreeze"
+              style="flex:0 0 auto;background:#111827;color:#fff;border:1px solid #dc2626;border-radius:9px;padding:9px 13px;font-weight:800;font-size:13px;cursor:pointer">
+        🛑 Freeze fleet
+      </button>
       <button id="emergency-btn" onclick="emergencyRestart(this)" title="Save the whole queue, wipe it, restart every agent, and have Michael brief you"
               style="flex:0 0 auto;background:#dc2626;color:#fff;border:0;border-radius:9px;padding:9px 13px;
                      font-weight:800;font-size:13px;letter-spacing:.2px;cursor:pointer;box-shadow:0 1px 0 rgba(0,0,0,.25)">
@@ -1018,14 +1118,18 @@ function tick() {
 }
 async function softRefresh() {
   await refreshData();
+  renderFreezeBanner();
   renderAuthBanner();
   renderStrip(); renderTabs();
   if (CURRENT_TAB === "agents") await showTab("agents");
 }
 async function poll() {
   if (!CONNECTED) return; // never hit the API (and never burn rate-limit strikes) while on the gate
-  try { await softRefresh(); }
-  catch (e) {
+  try {
+    await softRefresh();
+    if (RECONNECTING) setReconnecting(false);
+  } catch (e) {
+    if (e instanceof NetError) { setReconnecting(true, false); scheduleRetry(poll); return; } // keep the page, show the bar, retry fast
     if (/unauthorized|rate limited/i.test(e.message)) showGate(e.message);
   }
 }
@@ -1038,6 +1142,7 @@ function showGate(msg) {
   if (msg) $("#gate-err").textContent = msg;
 }
 async function connect() {
+  if (!RECONNECTING) setLoading(true);
   try {
     // Single auth probe FIRST: a wrong token costs exactly one rate-limit strike,
     // not a burst (refreshData fans out to several parallel calls, which would otherwise
@@ -1045,11 +1150,15 @@ async function connect() {
     await api("/api/agents");
     await refreshData();
     CONNECTED = true;
+    setReconnecting(false);
+    setLoading(false);
     $("#gate").classList.add("hidden");
     $("#app").classList.remove("hidden");
-    renderHeader(); renderAuthBanner(); renderStrip(); renderTabs();
+    renderHeader(); renderFreezeBanner(); renderAuthBanner(); renderStrip(); renderTabs();
     await showTab(CURRENT_TAB);
   } catch (e) {
+    if (e instanceof NetError) { setLoading(false); setReconnecting(true, true); scheduleRetry(connect); return; } // engine restarting: no token gate, no blank page
+    setLoading(false);
     showGate(e.message);
   }
 }

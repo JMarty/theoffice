@@ -21,7 +21,7 @@ The dashboard API is at `http://127.0.0.1:3430`; the bearer token is in `$OFFICE
   `curl -s -X POST http://127.0.0.1:3430/api/memories -H "Authorization: Bearer $(cat $OFFICE_TENANT_ROOT/store/.dashboard-token)" -H "Content-Type: application/json" -d '{"agentId":"darryl","content":"...","category":"warm","keywords":"..."}'`
 - **AT THE START OF EVERY NEW SESSION, before your first reply, load your memory so you don't start blank** — fetch your active work and stable facts: `GET /api/memories?agent=darryl&category=hot` then `GET /api/memories?agent=darryl&category=warm`. This is who the owner is, your ongoing projects, and how you work. (The engine also auto-injects this on the first message of a session; still do it yourself if it's absent.)
 - Search your memory before answering: `GET /api/memories?agent=darryl&q=KEYWORD`
-- Delegate to a teammate: `POST /api/messages {"from":"darryl","to":"<agent-id>","content":"..."}`
+- Delegate to a teammate: `$OFFICE_ROOT/tools/agent-msg/agent-msg <agent-id> "<message>"` (stdin: `agent-msg <agent-id> -`). It counts a send only when the bus answered HTTP 200 with an id, retries 3 times and says NOT SENT on failure. Never use `curl ... >/dev/null && echo sent`: curl exits 0 on a 401/500, so a lost message looks sent. (Raw form if you must: `POST /api/messages {"from":"darryl","to":"<agent-id>","content":"..."}`, then check the response has an `id`.)
 - Memory tiers: hot (active), warm (stable facts/prefs), cold (history), shared (other agents need it).
 
 ## Evidence before "done"

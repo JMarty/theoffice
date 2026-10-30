@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EngineConfig } from "../types.js";
 import { openDb, closeDb, getDb } from "../db/index.js";
 import { listQueued } from "../queue/index.js";
-import { fireDueTasks, catchUpMissed, sweepUnfinished } from "./index.js";
+import { fireDueTasks, catchUpMissed, sweepUnfinished, retryDeferred, schedulerTick, _deferredCountForTest, _clearDeferredForTest } from "./index.js";
 import { lastOccurrenceBefore } from "./cron.js";
 
 let root: string;
@@ -187,4 +187,129 @@ describe("task completion wiring", () => {
     expect((getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n).toBe(before);
   });
 
+});
+
+describe("quota guard wiring", () => {
+  const T = Date.parse("2026-06-24T10:00:00Z");
+  const hot = { source: "authoritative", fetchedAtMs: Date.now(), fiveHour: { usedPercent: 97, resetsAtMs: Date.now() + 3600_000 }, sevenDay: null };
+  const mkCfg = (guard: EngineConfig["quotaGuard"]): EngineConfig => {
+    const tdir = join(root, `scheduled-tasks-q-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(tdir, "hb"), { recursive: true });
+    mkdirSync(join(tdir, "report"), { recursive: true });
+    mkdirSync(join(tdir, "chore"), { recursive: true });
+    writeFileSync(join(tdir, "hb", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "heartbeat", prompt: "silent check" }));
+    writeFileSync(join(tdir, "report", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "task", prompt: "report to owner" }));
+    writeFileSync(join(tdir, "chore", "task-config.json"), JSON.stringify({ schedule: "* * * * *", agent: "qagent", type: "task", quota: "background", prompt: "background chore" }));
+    return { ...cfg, paths: { ...cfg.paths, scheduledTasksDir: tdir }, quotaGuard: guard };
+  };
+  const firedNames = () => (getDb().prepare(`SELECT name FROM task_runs WHERE agent='qagent'`).all() as { name: string }[]).map((r) => r.name).sort();
+
+  it("enforce + pressure: heartbeat and quota:background task are deferred, the owner report still fires, and no run row is left", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true, mode: "enforce" }), T)).toBe(1);
+    expect(firedNames()).toEqual(["report"]);
+    expect(_deferredCountForTest()).toBe(2); // parked, not dropped
+  });
+
+  it("a deferral is a DELAY: the parked heartbeat fires when pressure drops, once, keeping its original occurrence time", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    const c = mkCfg({ enabled: true, mode: "enforce" });
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    _clearDeferredForTest();
+    setSnapshotForTest(hot);
+    fireDueTasks(c, T + 300_000);
+    expect(retryDeferred(c, Date.now())).toBe(0); // still hot: stays parked
+    expect(_deferredCountForTest()).toBe(2);
+    setSnapshotForTest(null);
+    expect(retryDeferred(c, Date.now())).toBe(2);
+    expect(retryDeferred(c, Date.now())).toBe(0); // nothing left, no double fire
+    const occ = Math.floor((T + 300_000) / 1000);
+    const rows = getDb().prepare(`SELECT name, ts FROM task_runs WHERE agent='qagent' AND name IN ('hb','chore')`).all() as { name: string; ts: number }[];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.ts === occ)).toBe(true);
+  });
+
+  it("after maxDeferMin a parked occurrence runs even under pressure (late, never lost)", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    const c = mkCfg({ enabled: true, mode: "enforce", maxDeferMin: 60 });
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    _clearDeferredForTest();
+    setSnapshotForTest(hot);
+    fireDueTasks(c, T + 360_000);
+    expect(retryDeferred(c, Date.now() + 59 * 60_000)).toBe(0);
+    expect(retryDeferred(c, Date.now() + 61 * 60_000)).toBe(2);
+    expect(_deferredCountForTest()).toBe(0);
+  });
+
+  it("shadow mode fires everything even under pressure", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true }), T + 60_000)).toBe(3);
+  });
+
+  it("guard disabled (default) or no snapshot: everything fires", async () => {
+    const { setSnapshotForTest } = await import("../quota/guard.js");
+    setSnapshotForTest(null);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg({ enabled: true, mode: "enforce" }), T + 120_000)).toBe(3);
+    setSnapshotForTest(hot);
+    getDb().prepare(`DELETE FROM task_runs WHERE agent='qagent'`).run();
+    getDb().prepare(`DELETE FROM inbound_queue WHERE agent_id='qagent'`).run();
+    expect(fireDueTasks(mkCfg(undefined), T + 180_000)).toBe(3);
+  });
+});
+
+describe("freeze does not lose scheduled work", () => {
+  const getTick = () => (getDb().prepare(`SELECT v FROM scheduler_state WHERE k='last_tick'`).get() as { v: number } | undefined)?.v;
+  const setTick = (ms: number) => getDb().prepare(`INSERT INTO scheduler_state (k, v) VALUES ('last_tick', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(ms);
+
+  it("frozen ticks leave the watermark alone; the first tick after the thaw catches up the missed occurrence and resumes", async () => {
+    const { mkdtempSync: mk, rmSync: rm } = await import("node:fs");
+    const { freezeFleet, unfreezeFleet } = await import("../fleet/freeze.js");
+    const sdir = mk(join(tmpdir(), "office-frz2-"));
+    const fcfg = { ...cfg, paths: { ...cfg.paths, storeDir: sdir } } as EngineConfig;
+    const T0 = Date.parse("2026-06-26T08:00:00Z");
+    setTick(T0);
+    const st = { wasFrozen: false };
+    freezeFleet(fcfg, "test", "toby");
+    schedulerTick(fcfg, T0 + 5 * 60_000, st);
+    schedulerTick(fcfg, T0 + 10 * 60_000, st);
+    expect(getTick()).toBe(T0); // NOT advanced: the freeze window stays open for the catch-up
+    expect(st.wasFrozen).toBe(true);
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs WHERE name='every-minute'`).get() as { n: number }).n;
+    unfreezeFleet(fcfg);
+    schedulerTick(fcfg, T0 + 11 * 60_000, st);
+    expect(st.wasFrozen).toBe(false);
+    const after = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs WHERE name='every-minute'`).get() as { n: number }).n;
+    expect(after).toBeGreaterThan(before + 1); // the missed occurrence (catch-up) AND the current minute
+    expect(getTick()).toBe(T0 + 11 * 60_000); // watermark moves again
+    rm(sdir, { recursive: true, force: true });
+  });
+});
+
+describe("fleet freeze wiring", () => {
+  it("while frozen the scheduler fires nothing, catches up nothing, retries nothing and alarms nothing", async () => {
+    const { mkdtempSync: mk, rmSync: rm } = await import("node:fs");
+    const { freezeFleet, unfreezeFleet } = await import("../fleet/freeze.js");
+    const sdir = mk(join(tmpdir(), "office-frz-"));
+    const fcfg = { ...cfg, paths: { ...cfg.paths, storeDir: sdir } } as EngineConfig;
+    const T = Date.parse("2026-06-25T10:00:00Z");
+    const before = (getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n;
+    freezeFleet(fcfg, "test", "toby");
+    expect(fireDueTasks(fcfg, T)).toBe(0);
+    expect(catchUpMissed(fcfg, T)).toBe(0);
+    expect(sweepUnfinished(fcfg, T)).toBe(0);
+    expect(retryDeferred(fcfg, T)).toBe(0);
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM task_runs`).get() as { n: number }).n).toBe(before);
+    unfreezeFleet(fcfg);
+    expect(fireDueTasks(fcfg, T)).toBeGreaterThan(0); // thawed: the same call fires
+    rm(sdir, { recursive: true, force: true });
+  });
 });

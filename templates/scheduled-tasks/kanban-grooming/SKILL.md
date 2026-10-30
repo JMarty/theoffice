@@ -16,7 +16,7 @@ a heartbeat run: if there is nothing worth grooming or noting, do nothing and st
 • For each new / ungroomed planned card, assign a sensible *priority* and *project* via the metadata PATCH,
   weighing it against the operator goals in `tenant/GOALS.md` (does it move the needle, or is it noise?):
 
-    curl -s -X PATCH "$API/kanban/<id>" -H "Authorization: Bearer $TOKEN" \
+    curl -s -X PATCH "$API/kanban/<id>" -H "Authorization: Bearer $TOKEN" -H "X-Office-Agent: $OFFICE_AGENT_ID" \
       -H "Content-Type: application/json" -d '{"priority":"high","project":"ops"}'
 
   priority is one of low | normal | high | urgent. That endpoint can set ONLY priority/project — it is

@@ -1,6 +1,6 @@
 import { completeRun, OUTCOMES } from "../scheduler/completion.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { totalmem, freemem, cpus, loadavg, uptime as osUptime, homedir } from "node:os";
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
@@ -14,7 +14,7 @@ import { loadScheduledTasks } from "../scheduler/index.js";
 import { sendAgentMessage } from "../bus/index.js";
 import { enqueueOutbound } from "../queue/index.js";
 import { saveMemory, searchMemories, searchMemoriesHybrid } from "../memory/store.js";
-import { computeUsage, WINDOW_MS } from "./usage.js";
+import { computeUsageAsync, WINDOW_MS } from "./usage.js";
 import { checkUpdates, applyUpdate } from "./update.js";
 import { runEmergencyRestart } from "./emergency.js";
 import {
@@ -95,6 +95,9 @@ import {
   sendTray,
 } from "./owner-cards.js";
 import { checkDoneEvidence } from "./kanban-evidence.js";
+import { freezeFleet, freezeState, unfreezeFleet } from "../fleet/freeze.js";
+import { makeJwksProvider, verifyAccessJwt, type Jwks } from "./cf-access.js";
+import { archiveCard, cardEvents, createCard as createKanbanCard, moveCard, patchCard, type PatchFields } from "./kanban-audit.js";
 import { log } from "../logger.js";
 
 const logger = log("web");
@@ -201,12 +204,42 @@ export function getClientIp(req: IncomingMessage, trustedProxyToken?: string): s
   return req.socket.remoteAddress || "unknown";
 }
 
+const usageCache = new Map<string, { at: number; body: unknown }>();
+const usageInflight = new Map<string, Promise<unknown>>();
+let jwksOverride: ((refresh: boolean) => Promise<Jwks | null>) | null = null;
+export const _setJwksForTest = (f: ((refresh: boolean) => Promise<Jwks | null>) | null): void => { jwksOverride = f; };
+
 export function startServer(cfg: EngineConfig): () => void {
   const token = getOrCreateToken(cfg.paths.dashboardTokenFile);
+  const jwksProvider = jwksOverride ?? (cfg.web.cfAccess ? makeJwksProvider(cfg.web.cfAccess.teamDomain) : async () => null);
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${cfg.web.host}:${cfg.web.port}`);
     const path = url.pathname;
+    // Dashboard UNFREEZE: the one route that is NOT opened by the bearer token (every agent holds it). Its only credential is a Cloudflare Access JWT
+    // for the owner's email, verified against the team keys. A bearer, a request from 127.0.0.1 or a forged header gets a plain 403 and changes nothing.
+    if (path === "/api/fleet/unfreeze" && req.method === "POST") {
+      // A browser sends Sec-Fetch-Site on every request: anything not same-origin (another site's page driving the owner's logged-in browser) is refused.
+      const site = req.headers["sec-fetch-site"];
+      if (typeof site === "string" && site !== "same-origin") {
+        logger.warn({ site }, "dashboard unfreeze refused: cross-site request");
+        return json(res, 403, { error: "forbidden: same-origin requests only" });
+      }
+      const r = await verifyAccessJwt(
+        typeof req.headers["cf-access-jwt-assertion"] === "string" ? (req.headers["cf-access-jwt-assertion"] as string) : undefined,
+        cfg.web.cfAccess ?? { teamDomain: "", audiences: [], ownerEmail: "" },
+        _now(),
+        (refresh) => jwksProvider(refresh)
+      );
+      if (!r.ok) {
+        logger.warn({ reason: r.reason }, "dashboard unfreeze refused");
+        return json(res, 403, { error: "forbidden: unfreeze needs the owner, signed in through Cloudflare Access" });
+      }
+      const was = unfreezeFleet(cfg);
+      logger.warn({ was, from: req.headers["cf-connecting-ip"] ?? "no-cf-ip" }, "fleet thawed from the dashboard by the owner");
+      if (was && cfg.owner.slackUserId) enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet thawed from the dashboard (${r.email}). Agents can work again.`);
+      return json(res, 200, freezeState(cfg));
+    }
     if (path.startsWith("/api/")) {
       const ip = getClientIp(req, cfg.web.trustedProxyToken);
       const rl = cfg.web.rateLimit || { maxFails: 5, windowMs: 900000, blockMs: 60000, maxBlockMs: 3600000 };
@@ -258,6 +291,12 @@ export function startServer(cfg: EngineConfig): () => void {
         logger.error({ err, path }, "api error");
         return json(res, 500, { error: "server error" });
       }
+    }
+    if (path === "/mc") {
+      // Mission Control lives under /mc/; the address without the slash used to answer "not found"
+      res.writeHead(302, { location: "/mc/" });
+      res.end();
+      return;
     }
     if (cfg.web.dashboard === "mc" && (path === "/" || path === "/index.html")) {
       res.writeHead(302, { location: "/mc/" });
@@ -392,11 +431,28 @@ async function handleApi(
     let cutoff = 0;
     if (w === "restart") cutoff = BOOT_MS;
     else if (w !== "all") cutoff = Date.now() - (WINDOW_MS[w] ?? WINDOW_MS["24h"]!);
-    const agents = loadAgents(cfg);
-    const usage = computeUsage(agents, cutoff)
-      .map((u) => ({ ...u, displayName: agents.find((a) => a.id === u.id)?.displayName ?? u.id }))
-      .sort((a, b) => b.output - a.output);
-    return json(res, 200, { window: w, since: cutoff, bootMs: BOOT_MS, usage });
+    // Reading every agent's transcripts takes ~10 s and the dashboard asks every 15 s. So: it runs in a worker thread (never blocks the event
+    // loop), is cached for 60 s, a stale copy is served instantly while ONE refresh runs in the background, and concurrent callers share that refresh.
+    const hit = usageCache.get(w);
+    const fresh = hit && _now() - hit.at < 60_000;
+    let pending = usageInflight.get(w);
+    if (!fresh && !pending) {
+      const agents = loadAgents(cfg);
+      pending = computeUsageAsync(agents, cutoff).then((rows) => {
+        const usage = rows.map((u) => ({ ...u, displayName: agents.find((a) => a.id === u.id)?.displayName ?? u.id })).sort((a, b) => b.output - a.output);
+        const body = { window: w, since: cutoff, bootMs: BOOT_MS, usage };
+        usageCache.set(w, { at: _now(), body });
+        return body;
+      }).finally(() => usageInflight.delete(w));
+      pending.catch((err) => logger.warn({ err: String((err as Error)?.message ?? err) }, "usage refresh failed")); // handled: a failed background refresh must never be an unhandled rejection
+      usageInflight.set(w, pending);
+    }
+    if (hit) return json(res, 200, hit.body); // fresh, or stale while the refresh above runs
+    try {
+      return json(res, 200, await pending!);
+    } catch {
+      return json(res, 503, { error: "usage temporarily unavailable" });
+    }
   }
 
   // GET /api/update/check — list commits this install is behind
@@ -588,11 +644,7 @@ async function handleApi(
     if (!b?.title) return json(res, 400, { error: "title required" });
     if (b.status && !["planned", "in_progress", "waiting", "done"].includes(b.status)) return json(res, 400, { error: "bad status" });
     if (b.priority && !["low", "normal", "high", "urgent"].includes(b.priority)) return json(res, 400, { error: "bad priority" });
-    const id = randomBytes(4).toString("hex");
-    db.prepare(`INSERT INTO kanban_cards (id, title, description, status, assignee, priority, project, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, b.title, b.description ?? null, b.status ?? "planned", b.assignee ?? null,
-        b.priority ?? "normal", b.project ?? null, b.parentId ?? null);
+    const id = createKanbanCard(db, { title: b.title, description: b.description, status: b.status, assignee: b.assignee, priority: b.priority, project: b.project, parentId: b.parentId }, actorOf(req, b));
     return json(res, 200, { id });
   }
 
@@ -771,19 +823,53 @@ async function handleApi(
     // card exactly as it was rather than half-moved.
     const ev = checkDoneEvidence(st, typeof body.verification === "string" ? body.verification : undefined, id);
     if (!ev.ok) return json(res, 400, { error: ev.error });
-    const info = ev.verification
-      ? db.prepare(`UPDATE kanban_cards SET status=?, verification=?, updated_at=unixepoch() WHERE id=?`).run(st, ev.verification, id)
-      : db.prepare(`UPDATE kanban_cards SET status=?, updated_at=unixepoch() WHERE id=?`).run(st, id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    // Optional compare-and-set: `expected_status` makes the move conditional on the card still being in that status.
+    const expected = typeof body.expected_status === "string" ? body.expected_status : null;
+    if (expected !== null && !["planned", "in_progress", "waiting", "done"].includes(expected)) return json(res, 400, { error: "bad expected_status" });
+    const mv = moveCard(db, id, st, { actor: actorOf(req, body), expected, verification: ev.verification ?? null });
+    if (mv.result === "notfound") return json(res, 404, { error: "card not found", id });
+    if (mv.result === "conflict") return json(res, 409, { error: "card is not in the expected status", id, expected_status: expected, current_status: mv.current });
     return json(res, 200, { ok: true, id });
   }
+
+  // --- fleet freeze (the red button). Any dashboard-token holder, including an agent, may FREEZE. There is no bearer-authenticated unfreeze: every agent
+  // holds this token. Thawing is the owner's Cloudflare-Access-verified dashboard button (POST /api/fleet/unfreeze, handled above the bearer gate), his
+  // Slack command (src/fleet/freeze.ts), or deleting <store>/fleet-freeze.json on the box.
+  if (path === "/api/fleet/freeze" && m === "GET") return json(res, 200, freezeState(cfg));
+  // Dashboard Unfreeze on a host WITHOUT Cloudflare Access (e.g. the LAN address): this thaws nothing. It only asks the owner, on Slack, to confirm;
+  // the thaw happens when the owner himself replies "unfreeze fleet" (verified Slack user id, src/fleet/freeze.ts). At most one request per 5 minutes.
+  if (path === "/api/fleet/unfreeze-request" && m === "POST") {
+    if (!freezeState(cfg).frozen) return json(res, 200, { sent: false, reason: "the fleet is not frozen" });
+    if (!cfg.owner.slackUserId) return json(res, 409, { sent: false, reason: "no owner Slack user configured" });
+    const last = (db.prepare(`SELECT v FROM scheduler_state WHERE k='unfreeze_request_at'`).get() as { v: number } | undefined)?.v ?? 0;
+    const nowMs = _now();
+    if (nowMs - last < 5 * 60_000) return json(res, 200, { sent: false, reason: "already asked a moment ago, check Slack" });
+    db.prepare(`INSERT INTO scheduler_state (k, v) VALUES ('unfreeze_request_at', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(nowMs);
+    enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Someone pressed Unfreeze on the dashboard. The fleet is frozen: ${freezeState(cfg).reason ?? "no reason recorded"}. Confirm: reply "unfreeze fleet" to thaw it, or ignore this to keep it frozen.`);
+    logger.warn("dashboard unfreeze requested: asked the owner to confirm on Slack");
+    return json(res, 200, { sent: true });
+  }
+  if (path === "/api/fleet/freeze" && m === "POST") {
+    const raw = await readBody(req, res); if (raw === null) return;
+    const b = parseJson(raw) ?? {};
+    const by = actorOf(req, b) ?? "unknown";
+    const was = freezeState(cfg).frozen;
+    const s = freezeFleet(cfg, typeof b.reason === "string" && b.reason.trim() ? b.reason.trim() : "no reason given", by);
+    if (!was && cfg.owner.slackUserId) {
+      enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet FROZEN by ${by}: ${s.reason}. No Claude agent can run a tool, no new message is delivered and no scheduled work starts (an agent on another runtime, e.g. codex, finishes its current turn). Reply "unfreeze fleet" to thaw.`);
+    }
+    return json(res, 200, s);
+  }
+
+  // --- kanban audit trail : GET /api/kanban/<id>/events -> {status:[...], fields:[...]} ---
+  const ke = path.match(/^\/api\/kanban\/([^/]+)\/events$/);
+  if (ke && m === "GET") return json(res, 200, cardEvents(db, decodeURIComponent(ke[1]!)));
 
   // --- kanban archive : /api/kanban/<id>/archive (reversible: set archived_at) ---
   const ka = path.match(/^\/api\/kanban\/([^/]+)\/archive$/);
   if (ka && m === "POST") {
     const id = decodeURIComponent(ka[1]!);
-    const info = db.prepare(`UPDATE kanban_cards SET archived_at=unixepoch(), updated_at=unixepoch() WHERE id=?`).run(id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    if (archiveCard(db, id, actorOf(req, null)).result === "notfound") return json(res, 404, { error: "card not found", id });
     return json(res, 200, { ok: true, id });
   }
 
@@ -812,8 +898,10 @@ async function handleApi(
     }
     if (sets.length === 0) return json(res, 400, { error: "no updatable fields (priority/project only)" });
     const id = decodeURIComponent(kp[1]!);
-    const info = db.prepare(`UPDATE kanban_cards SET ${sets.join(", ")}, updated_at=unixepoch() WHERE id=?`).run(...vals, id);
-    if (info.changes === 0) return json(res, 404, { error: "card not found", id });
+    const fields: PatchFields = {};
+    if ("priority" in body) fields.priority = body.priority;
+    if ("project" in body) fields.project = body.project;
+    if (patchCard(db, id, fields, actorOf(req, body)).result === "notfound") return json(res, 404, { error: "card not found", id });
     return json(res, 200, { ok: true, id });
   }
 
@@ -1011,6 +1099,13 @@ async function tuneAgent(
       ? tuned.message
       : `saved; not applied live (${tuned.reason}) — takes effect at next restart`,
   });
+}
+
+/** Who is calling: X-Office-Agent (set from OFFICE_AGENT_ID in an agent session) or body.actor. Attribution by convention, not authentication. */
+function actorOf(req: IncomingMessage, body: { actor?: unknown } | null | undefined): string | null {
+  const h = String(req.headers["x-office-agent"] ?? "").trim();
+  const b = body && typeof body.actor === "string" ? body.actor.trim() : "";
+  return (h || b || "").slice(0, 60) || null;
 }
 
 function parseJson(s: string): JsonBody | null {

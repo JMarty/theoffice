@@ -120,6 +120,8 @@ def preview(text, n=90):
 
 
 def run_once(dry=False, verbose=False, check_live=True):
+    if os.path.exists(f"{TENANT}/store/fleet-freeze.json"):
+        return {"alert": [], "redrive": []}  # fleet freeze: delivery is halted on purpose, silence is expected, do not alert or re-drive
     conn = db()
     rows = find_gap_rows(conn)
     now = int(time.time())
@@ -183,6 +185,27 @@ def run_once(dry=False, verbose=False, check_live=True):
     return acted
 
 
+def _bus_accepted(body):
+    """Same rule as agent-msg: the bus accepted a message only if it answered with an integer id (a 200 without one must not burn the alert cooldown)."""
+    try:
+        return isinstance(json.loads(body).get("id"), int)
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def main_inbox_check(dry=False):
+    """Second job of this timer: bus messages to the main agent that never reach it (see tools/agent-msg/stall_check.py).
+    Alerts the infra agent (not the stalled inbox itself) at most once an hour; the stamp in store/main-inbox-observer.json shows the observer is alive."""
+    sys.path.insert(0, os.path.join(ROOT, "tools", "agent-msg"))
+    import stall_check
+    main_agent = os.environ.get("OFFICE_MAIN_AGENT", "marveen")
+    alert_to = os.environ.get("MAIN_INBOX_ALERT_TO", "darryl")
+    res = stall_check.check(DB, main_agent, f"{TENANT}/store/main-inbox-observer.json", int(time.time()),
+                            int(os.environ.get("MAIN_INBOX_STALL_SEC", "1800")), 3600,
+                            (lambda text: print(text) or True) if dry else (lambda text: _bus_accepted(bus(alert_to, text))))
+    return res
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="report what WOULD happen; touch nothing")
@@ -191,3 +214,9 @@ if __name__ == "__main__":
                     help="skip the turn-ended (pane) gate -- TESTING ONLY; alarms a working agent")
     a = ap.parse_args()
     run_once(dry=a.dry_run, verbose=a.verbose, check_live=not a.no_live)
+    try:
+        r = main_inbox_check(dry=a.dry_run)
+        if a.verbose or a.dry_run:
+            print(f"main-inbox stalled rows: {r['stalled']} alerted={r['alerted']}")
+    except Exception as e:  # the second job must never break the first
+        print(f"main-inbox check failed: {type(e).__name__}", file=sys.stderr)

@@ -2,7 +2,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineConfig, ScheduledTaskType } from "../types.js";
 import { enqueueInbound } from "../queue/index.js";
+import { isFrozen } from "../fleet/freeze.js";
 import { sendAgentMessage } from "../bus/index.js";
+import { guardDecision } from "../quota/guard.js";
 import { alarmDigest, completionInstruction, expectsCompletion, findUnfinished, markAlarmed } from "./completion.js";
 import { getDb } from "../db/index.js";
 import { isDueNow, minuteKey, lastOccurrenceBefore } from "./cron.js";
@@ -13,6 +15,10 @@ const TICK_MS = 30_000; // sub-minute; per-minute dedup makes double-fire imposs
 // Boot catch-up looks back at most this far for occurrences missed while the engine was down — bounds the
 // work and avoids replaying ancient misses after a long outage.
 const CATCHUP_MAX_MS = 6 * 60 * 60 * 1000;
+const DEFER_MAX_MIN_DEFAULT = 180; // a deferred occurrence runs anyway after this long, so a time-sensitive heartbeat is late, never lost
+const deferred = new Map<string, { task: ScheduledTask; tsSec: number; deferredAtMs: number }>();
+export const _deferredCountForTest = (): number => deferred.size;
+export const _clearDeferredForTest = (): void => deferred.clear();
 const SWEEP_MAX = 5; // alarms per tick: a backlog (e.g. after an outage) cannot flood the main agent
 
 export interface ScheduledTask {
@@ -23,6 +29,8 @@ export interface ScheduledTask {
   type: ScheduledTaskType; // 'task' (always reports) | 'heartbeat' (notify only if important)
   enabled: boolean;
   prompt: string;
+  /** 'background' marks a task nobody is waiting on, so the quota guard may defer it like a heartbeat */
+  quota?: "background";
 }
 
 interface TaskConfig {
@@ -33,6 +41,7 @@ interface TaskConfig {
   type?: ScheduledTaskType;
   enabled?: boolean;
   prompt?: string;
+  quota?: string;
 }
 
 /**
@@ -68,6 +77,7 @@ export function loadScheduledTasks(cfg: EngineConfig): ScheduledTask[] {
       type: tc.type === "heartbeat" ? "heartbeat" : "task",
       enabled: tc.enabled !== false,
       prompt,
+      ...(tc.quota === "background" ? { quota: "background" as const } : {}),
     });
   }
   return out;
@@ -85,7 +95,19 @@ function wrap(task: ScheduledTask, runId?: number): string {
  * Record the run, then enqueue its prompt carrying the run id. The run row comes first because the prompt needs its id;
  * a deduped enqueue (same minute already fired) removes the row again, so a duplicate never leaves an open orphan.
  */
-function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string): number | undefined {
+function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: string, bypassGuard = false): number | undefined {
+  // Quota guard: only background work (heartbeats, tasks marked quota:"background") can be deferred; tasks that report to the owner always run.
+  // A deferral is a DELAY, not a skip: the occurrence is parked and retried every tick until the pressure drops or maxDeferMin passes (see retryDeferred).
+  const g = bypassGuard ? { run: true, wouldDefer: false, reason: "max-defer" } : guardDecision(cfg, t.type === "heartbeat" || t.quota === "background" ? "background" : "owner-facing", Date.now());
+  if (!g.run) {
+    if (!deferred.has(dedupKey)) {
+      deferred.set(dedupKey, { task: t, tsSec, deferredAtMs: Date.now() });
+      logger.warn({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard: background work deferred");
+    }
+    return undefined;
+  }
+  deferred.delete(dedupKey);
+  if (g.wouldDefer) logger.info({ task: t.name, agent: t.agent, reason: g.reason }, "quota guard (shadow): would defer");
   const db = getDb();
   const completion = cfg.taskCompletion?.enabled !== false;
   const run = db
@@ -101,8 +123,21 @@ function fireOne(cfg: EngineConfig, t: ScheduledTask, tsSec: number, dedupKey: s
   return id;
 }
 
+/** Retry parked (quota-deferred) occurrences: fire when the guard lets them through, or unconditionally once maxDeferMin has passed. */
+export function retryDeferred(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // fleet freeze: parked occurrences stay parked
+  const maxMs = (cfg.quotaGuard?.maxDeferMin ?? DEFER_MAX_MIN_DEFAULT) * 60_000;
+  let fired = 0;
+  for (const [key, d] of [...deferred]) {
+    if (fireOne(cfg, d.task, d.tsSec, key, nowMs - d.deferredAtMs >= maxMs) != null) fired++;
+    else if (!deferred.has(key)) deferred.delete(key); // already fired elsewhere (dedup): nothing left to retry
+  }
+  return fired;
+}
+
 /** Alarm the main agent with ONE digest (each run once) about task runs that fired but were never marked complete. */
 export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // nothing can complete while frozen, so nothing is overdue
   if (cfg.taskCompletion?.enabled === false || cfg.taskCompletion?.alarm === false) return 0; // shadow mode: instruction + records, no alarm
   const db = getDb();
   const nowSec = Math.floor(nowMs / 1000);
@@ -118,6 +153,7 @@ export function sweepUnfinished(cfg: EngineConfig, nowMs: number): number {
 
 /** Fire any tasks due in the current minute (idempotent via inbound dedup key). */
 export function fireDueTasks(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0; // fleet freeze: no new agent work
   const tasks = loadScheduledTasks(cfg).filter((t) => t.enabled && t.prompt);
   const mk = minuteKey(nowMs);
   let fired = 0;
@@ -153,6 +189,7 @@ function setLastTick(ms: number): void {
  * task (not a backlog replay) so a frequent task can't flood the fleet after a long outage.
  */
 export function catchUpMissed(cfg: EngineConfig, nowMs: number): number {
+  if (isFrozen(cfg)) return 0;
   const lastTick = getLastTick();
   if (lastTick == null) return 0; // first boot ever -> no prior run to catch up from
   const since = Math.max(lastTick, nowMs - CATCHUP_MAX_MS);
@@ -174,23 +211,47 @@ export function catchUpMissed(cfg: EngineConfig, nowMs: number): number {
   return fired;
 }
 
+/**
+ * One scheduler tick. While the fleet is frozen NOTHING happens, and the catch-up watermark (last_tick) deliberately stays put, so an occurrence
+ * that came due during the freeze is not lost: on the first tick after the thaw catchUpMissed runs once (it fires only the latest missed
+ * occurrence per task, within its 6 h window) before the regular cadence resumes.
+ */
+export function schedulerTick(cfg: EngineConfig, nowMs: number, st: { wasFrozen: boolean }): void {
+  if (isFrozen(cfg)) {
+    st.wasFrozen = true;
+    return;
+  }
+  if (st.wasFrozen) {
+    st.wasFrozen = false;
+    const n = catchUpMissed(cfg, nowMs);
+    logger.warn({ caughtUp: n }, "fleet thawed: scheduler caught up occurrences missed during the freeze");
+  }
+  retryDeferred(cfg, nowMs);
+  fireDueTasks(cfg, nowMs);
+  sweepUnfinished(cfg, nowMs);
+  setLastTick(nowMs); // advance the catch-up watermark each live tick
+}
+
 export function startScheduler(cfg: EngineConfig): () => void {
   let stopped = false;
-  // Fire anything missed while the engine was down, BEFORE starting the regular cadence.
-  try {
-    const n = catchUpMissed(cfg, Date.now());
-    if (n > 0) logger.warn({ caughtUp: n }, "scheduler boot catch-up");
-  } catch (err) {
-    logger.error({ err }, "scheduler catch-up error");
+  const st = { wasFrozen: isFrozen(cfg) };
+  if (!st.wasFrozen) {
+    // Fire anything missed while the engine was down, BEFORE starting the regular cadence.
+    try {
+      const n = catchUpMissed(cfg, Date.now());
+      if (n > 0) logger.warn({ caughtUp: n }, "scheduler boot catch-up");
+    } catch (err) {
+      logger.error({ err }, "scheduler catch-up error");
+    }
+    setLastTick(Date.now());
+  } else {
+    logger.warn("scheduler started while the fleet is FROZEN: nothing fires, the catch-up watermark is kept for the thaw");
   }
-  setLastTick(Date.now());
 
   const tick = () => {
     if (stopped) return;
     try {
-      fireDueTasks(cfg, Date.now());
-      sweepUnfinished(cfg, Date.now());
-      setLastTick(Date.now()); // advance the catch-up watermark each live tick
+      schedulerTick(cfg, Date.now(), st);
     } catch (err) {
       logger.error({ err }, "scheduler tick error");
     }

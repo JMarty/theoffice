@@ -79,6 +79,10 @@ export interface EngineConfig {
   cleanResetScript?: string;
   /** scheduled-task completion: runs carry an id + completion instruction; unfinished `task` runs alarm the main agent once (heartbeats never) */
   taskCompletion?: { enabled?: boolean; alarm?: boolean; alarmAfterMin?: number; alarmMaxAgeH?: number };
+  /** quota guard: defer BACKGROUND (heartbeat) work when the Claude quota is nearly spent. Off by default; shadow mode logs what it would defer, enforce mode defers. Owner-facing work always runs; any unknown state fails open. */
+  quotaGuard?: { enabled?: boolean; mode?: "shadow" | "enforce"; deferAtPercent?: number; nearResetPercent?: number; maxDeferMin?: number; credentialsFile?: string };
+  /** several Claude plans: move the fleet to another when the active one is spent. mode "observe" (default) only reports; "act" swaps the live credentials file. */
+  claudePlans?: { mode?: "observe" | "act"; rotateAtPercent?: number; plans: { id: string; credentialsFile: string }[] };
   /** briefing-board section keys this tenant accepts (replaces the built-in default list) */
   briefingSections?: string[];
   /** extra identifiers the shipped-template leak check must reject (owner nickname, private repo names ...) */
@@ -138,6 +142,12 @@ export interface WebConfig {
    * spoofing its rate-limit IP. Unset = forwarding headers trusted as before (backward compatible).
    */
   trustedProxyToken?: string;
+  /**
+   * Cloudflare Access in front of the dashboard (via the tunnel). Needed for the dashboard Unfreeze button: the fleet can be thawed only by a request
+   * carrying a Cf-Access-Jwt-Assertion that verifies against the team keys for one of `audiences` and the owner's email (src/web/cf-access.ts).
+   * Unset = no dashboard unfreeze at all (Slack / deleting the file still work).
+   */
+  cfAccess?: { teamDomain: string; audiences: string[]; ownerEmail: string };
   /**
    * Which dashboard `/` opens: "classic" (default) or "mc" (Mission Control, served under /mc/).
    * With "mc", `/` redirects to /mc/ and Mission Control hides its "Classic" switch link.

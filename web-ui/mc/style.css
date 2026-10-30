@@ -356,3 +356,10 @@ nav.tabs button.active .badge { background: var(--accentSoft); color: var(--acce
   .bars7 { gap: 6px; }
   .btnrow button { padding: 11px 16px; }       /* comfortable tap targets */
 }
+
+/* reconnecting: never a blank page while the engine restarts */
+#reconnect-screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; background: var(--bg, #0b0c0e); color: var(--text, #e6e8eb); z-index: 99990; padding: 24px; }
+#reconnect-screen.hidden, #reconnect-bar.hidden { display: none; }
+#reconnect-screen .rc-msg { font-size: 18px; font-weight: 700; margin-top: 6px; }
+#reconnect-screen .rc-sub { font-size: 13px; opacity: .7; max-width: 34ch; }
+#reconnect-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 99995; background: #92400e; color: #fff; text-align: center; font-weight: 700; font-size: 13px; padding: 8px 12px; }
