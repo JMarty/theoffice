@@ -222,6 +222,13 @@ export const MIGRATIONS: Migration[] = [
             updated_at          INTEGER NOT NULL DEFAULT (unixepoch())
           );`,
   },
+  {
+    version: 12,
+    name: "runtime_sessions.context_window",
+    // The model's own context window as reported by the CLI (0 = unknown, the per-runtime constant is used).
+    // Migration-only (Model A).
+    sql: `ALTER TABLE runtime_sessions ADD COLUMN context_window INTEGER NOT NULL DEFAULT 0;`,
+  },
 ];
 
 /** Highest known schema version (the baseline, or the max migration version). */

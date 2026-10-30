@@ -11,8 +11,9 @@ import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, M
 import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
+import { readGeminiContext } from "./exec-context.js";
 import { createModelCatalog, parseAgyModels, runCli } from "./model-catalog.js";
-import { sessionToResume, saveSession, clearSession, recordUsage, usageFromGemini, contextTokensOf, alertConfigFailure, CONFIG_ERROR_RE } from "./exec-sessions.js";
+import { sessionToResume, saveSession, clearSession, recordUsage, usageFromGemini, alertConfigFailure, CONFIG_ERROR_RE } from "./exec-sessions.js";
 
 /**
  * Gemini runtime — drives an agent on Google's Antigravity CLI (`agy`), the successor to the Gemini CLI
@@ -246,7 +247,9 @@ export function bookTurn(agentId: string, stdout: string): void {
   const usage = usageFromGemini(o?.usage);
   const cid = typeof o?.conversation_id === "string" && o.conversation_id ? o.conversation_id : null;
   if (usage) recordUsage(agentId, cid, usage);
-  if (cid) saveSession(agentId, "gemini", cid, usage ? contextTokensOf(usage) : 0);
+  // The turn's usage is a SUM over its model calls, so the context size comes from the conversation's last call.
+  const ctx = cid ? readGeminiContext(cid) : null;
+  if (cid) saveSession(agentId, "gemini", cid, ctx?.tokens ?? 0, ctx?.window ?? 0);
 }
 
 const GEMINI_FALLBACK_MODELS = [
