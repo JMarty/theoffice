@@ -15,18 +15,20 @@ const q = { markDelivering: vi.fn(), markDelivered: vi.fn(), markFailed: vi.fn()
 vi.mock("../queue/index.js", () => q);
 vi.mock("../memory/conversation.js", () => ({ recordInbound: vi.fn() }));
 vi.mock("../env.js", () => ({ readEnvFile: () => ({}) }));
+const alertSpy = vi.fn();
 const store = {
   sessionToResume: vi.fn((): string | null => null),
   saveSession: vi.fn(),
   clearSession: vi.fn(),
   recordUsage: vi.fn(),
+  alertConfigFailure: alertSpy,
 };
 vi.mock("./exec-sessions.js", async (orig) => ({ ...(await orig<typeof import("./exec-sessions.js")>()), ...store }));
 
 const { deliverCodexPrompt } = await import("./codex-runtime.js");
 const { deliverGeminiPrompt } = await import("./gemini-runtime.js");
 
-const cfg = { owner: { timezone: "UTC" }, paths: { tenantRoot: "/t" }, web: { port: 3430 } } as never;
+const cfg = { mainAgentId: "zeus", owner: { timezone: "UTC" }, paths: { tenantRoot: "/t" }, web: { port: 3430 } } as never;
 let n = 0;
 const agent = (extra: object = {}) => ({ id: `ct-${++n}`, dir: "/tmp/does-not-exist", ...extra }) as never;
 const item = (a: { id: string }) => ({ id: 1, agent_id: a.id, source: "manual", prompt: "hi", reply_channel: null, attempts: 0 }) as never;
@@ -93,7 +95,7 @@ describe("codex continuity + flags", () => {
 describe("gemini continuity + flags", () => {
   it("passes --output-format json, --effort and --conversation", () => {
     store.sessionToResume.mockReturnValue("conv-1");
-    const a = agent({ effort: "xhigh", model: "gemini-3.1-pro-high" });
+    const a = agent({ effort: "xhigh" });
     deliverGeminiPrompt(cfg, a, item(a as { id: string }));
     const args = argsOf();
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
@@ -124,5 +126,49 @@ describe("gemini continuity + flags", () => {
     child.emit("close", 1);
     expect(store.clearSession).toHaveBeenCalledWith(a.id);
     expect(q.requeueNoPenalty).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("gemini --effort vs --model (agy refuses the combination)", () => {
+  it("a pinned model gets NO --effort", () => {
+    const a = agent({ model: "gemini-3.8-flash-high", effort: "high" });
+    deliverGeminiPrompt(cfg, a, item(a as { id: string }));
+    expect(argsOf()).toContain("--model");
+    expect(argsOf()).not.toContain("--effort");
+  });
+  it("no pinned model -> --effort is passed", () => {
+    const a = agent({ effort: "low" });
+    deliverGeminiPrompt(cfg, a, item(a as { id: string }));
+    expect(argsOf()).not.toContain("--model");
+    expect(argsOf()[argsOf().indexOf("--effort") + 1]).toBe("low");
+  });
+});
+
+describe("deterministic config errors fail once and alert", () => {
+  it("gemini: exit 1 + status ERROR 'conflicts with --effort' -> failed at attempt 0, no requeue, alert", () => {
+    const a = agent({ model: "x" }) as { id: string };
+    deliverGeminiPrompt(cfg, a as never, item(a));
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ conversation_id: "", status: "ERROR", error: 'invalid model selection (--model "x"): --model x conflicts with --effort=low' })));
+    child.emit("close", 1);
+    expect(q.markFailed).toHaveBeenCalledTimes(1);
+    expect(q.requeue).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledWith("zeus", a.id, "gemini", 1, expect.stringContaining("conflicts with"));
+  });
+  it("gemini: a transient exit 1 (no config text) still retries", () => {
+    const a = agent() as { id: string };
+    deliverGeminiPrompt(cfg, a as never, item(a));
+    child.stdout.emit("data", Buffer.from('{"status":"ERROR","error":"upstream 503"}'));
+    child.emit("close", 1);
+    expect(q.requeue).toHaveBeenCalledTimes(1);
+    expect(q.markFailed).not.toHaveBeenCalled();
+  });
+  it("codex: an error event naming an unknown model fails once and alerts", () => {
+    const a = agent({ model: "gpt-9" }) as { id: string };
+    deliverCodexPrompt(cfg, a as never, item(a));
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ type: "error", message: "The model `gpt-9` does not exist" }) + "\n"));
+    child.emit("close", 1);
+    expect(q.markFailed).toHaveBeenCalledTimes(1);
+    expect(q.requeue).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalled();
   });
 });

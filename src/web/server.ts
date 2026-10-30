@@ -1102,6 +1102,7 @@ async function tuneAgent(
       [kind]: value,
       applied: true,
       note: `restarted ${agent.id} to apply (this provider has no live-switch path)`,
+      ...(kind === "effort" && runtimeFor(agent).effortNote ? { warning: runtimeFor(agent).effortNote } : {}),
     });
   }
 

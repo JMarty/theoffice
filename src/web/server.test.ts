@@ -372,11 +372,11 @@ describe("agent effort/model tuning", () => {
       join(tempDir, "agents", "home", "agent.json"),
       JSON.stringify({ displayName: "Home", runtime: "gemini" }),
     );
-    const res = await tune("model", { model: "gemini-3.6-flash-high" });
+    const res = await tune("model", { model: "gemini-3.8-flash-high" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.note).toMatch(/restarted/i);
-    expect(agentJson().model).toBe("gemini-3.6-flash-high");
+    expect(agentJson().model).toBe("gemini-3.8-flash-high");
   });
 });
 

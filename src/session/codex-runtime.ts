@@ -11,7 +11,8 @@ import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, M
 import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
-import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, contextTokensOf, type TurnUsage } from "./exec-sessions.js";
+import { createModelCatalog, parseCodexModels, runCli } from "./model-catalog.js";
+import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, contextTokensOf, alertConfigFailure, CONFIG_ERROR_RE, type TurnUsage } from "./exec-sessions.js";
 
 /**
  * Codex runtime path (Pete-on-Codex pilot). A `runtime: "codex"` agent does NOT run a persistent TUI
@@ -54,8 +55,11 @@ export function decideCodexOutcome(o: {
   sawUsageLimit: boolean;
   attempts: number;
   maxAttempts?: number;
+  /** deterministic configuration error: fail now, retries cannot help */
+  configError?: boolean;
 }): CodexOutcome {
   if (o.code === 0 && o.sawCompleted) return "delivered";
+  if (o.configError) return "failed";
   if (o.sawUsageLimit) return "backoff";
   return o.attempts >= (o.maxAttempts ?? MAX_DELIVERY_ATTEMPTS) ? "failed" : "requeue";
 }
@@ -145,6 +149,7 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   let sawCompleted = false;
   let sawUsageLimit = false;
   let threadId: string | null = null;
+  let configError: string | null = null;
   let turnUsage: TurnUsage | null = null;
   let buf = "";
   let settled = false; // latch: 'error' is usually FOLLOWED by 'close' — book the terminal outcome exactly once
@@ -173,7 +178,7 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       logger.warn({ id: item.id, agent: agent.id, timeoutMin: TURN_TIMEOUT_MS / 60_000 }, "codex turn watchdog timeout -> killed + requeued (no attempt charged)");
       return;
     }
-    const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts });
+    const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts, configError: !!configError });
     if (outcome === "delivered") {
       if (turnUsage) recordUsage(agent.id, threadId, turnUsage);
       if (threadId) saveSession(agent.id, "codex", threadId, turnUsage ? contextTokensOf(turnUsage) : 0);
@@ -191,7 +196,8 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       requeueNoPenalty(item.id);
       logger.warn({ id: item.id, agent: agent.id, code }, "codex resume failed -> conversation reset, retrying fresh (no attempt charged)");
     } else if (outcome === "failed") {
-      markFailed(item.id, errMsg ?? `exit ${code}, turn.completed=${sawCompleted}`);
+      markFailed(item.id, errMsg ?? configError ?? `exit ${code}, turn.completed=${sawCompleted}`);
+      if (configError) alertConfigFailure(cfg.mainAgentId, agent.id, "codex", item.id, configError);
       logger.warn({ id: item.id, agent: agent.id, code }, "codex delivery failed (max attempts)");
     } else {
       requeue(item.id);
@@ -209,6 +215,9 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       try {
         const ev = JSON.parse(line);
         if (ev?.type === "thread.started" && typeof ev.thread_id === "string") threadId = ev.thread_id;
+        // error / turn.failed events carry the CLI's message; a config-class message can never succeed on retry
+        const evMsg = ev?.type === "error" ? ev.message : ev?.type === "turn.failed" ? ev.error?.message : undefined;
+        if (typeof evMsg === "string" && CONFIG_ERROR_RE.test(evMsg)) configError = evMsg;
         if (ev?.type === "turn.completed") {
           sawCompleted = true;
           turnUsage = usageFromCodex(ev.usage);
@@ -228,12 +237,23 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   child.on("error", (err) => finish(null, `spawn error: ${String((err as Error).message ?? err)}`));
 }
 
+const codexCatalog = createModelCatalog({
+  fallback: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+  fetch: async () => parseCodexModels(await runCli("codex", ["debug", "models"])),
+});
+export function warmCodexModels(): Promise<readonly string[]> {
+  return codexCatalog.warm();
+}
+
 export const codexRuntime: Runtime = {
   id: "codex",
   label: "OpenAI Codex (GPT-5.5)",
-  // Selectable `-m` values: the visible entries of `codex debug models` (codex-cli 0.139.0, 2026-10-30).
+  // Selectable `-m` values: the entries `codex debug models` lists as selectable, read from the CLI (cached,
+  // refreshed in the background). The built-in list is only the cold-start fallback.
   // Empty agent.model -> the signed-in account's default.
-  models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+  get models() {
+    return codexCatalog.get();
+  },
   // `-c model_reasoning_effort=...`; the catalog's supported_reasoning_levels for every listed model.
   efforts: ["low", "medium", "high", "xhigh"],
   launch: launchCodexHolder,
