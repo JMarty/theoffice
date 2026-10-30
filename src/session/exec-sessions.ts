@@ -131,3 +131,34 @@ export function estimatedContextPct(agentId: string, runtime: string): number | 
   if (!s || !win) return null;
   return Math.min(100, Math.round((s.lastContextTokens / win) * 100));
 }
+
+/**
+ * A DETERMINISTIC configuration failure (unknown/unsupported model, conflicting flags): retrying cannot help,
+ * so the caller fails the item once instead of burning the whole attempt budget. This tells the main agent,
+ * throttled to one alert per agent per 30 minutes so a backlog of queued prompts does not flood the bus.
+ */
+const CONFIG_ALERT_GAP_MS = 30 * 60_000;
+const lastConfigAlert = new Map<string, number>();
+export function alertConfigFailure(mainAgentId: string, agentId: string, runtime: string, itemId: number, detail: string): void {
+  const nowMs = Date.now();
+  if (nowMs - (lastConfigAlert.get(agentId) ?? 0) < CONFIG_ALERT_GAP_MS) return;
+  lastConfigAlert.set(agentId, nowMs);
+  try {
+    // direct insert, same row sendAgentMessage writes: importing the bus here would close an import cycle
+    // (bus -> agents -> runtime -> this module)
+    getDb()
+      .prepare(`INSERT INTO agent_messages (from_agent, to_agent, content) VALUES (?, ?, ?)`)
+      .run(
+      "engine",
+      mainAgentId,
+      `${runtime} agent "${agentId}" has a configuration error: queue item #${itemId} was failed WITHOUT retries (retrying cannot fix it). ` +
+        `Detail: ${detail.slice(0, 300)}. Check the agent's model/effort in agent.json against the runtime's model list (GET /api/runtimes).`,
+    );
+  } catch (err) {
+    logger.warn({ agent: agentId, err: String((err as Error).message ?? err) }, "config-error alert not sent");
+  }
+}
+
+/** Error texts that mean "this invocation can never work" (as opposed to a transient/provider failure). */
+export const CONFIG_ERROR_RE =
+  /invalid model|unknown model|model .*(?:not found|does not exist|not supported)|not supported for model|conflicts with|invalid .*selection|unrecognized (?:option|argument)|unknown flag|flag provided but not defined|unexpected argument/i;
