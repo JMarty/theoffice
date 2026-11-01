@@ -54,6 +54,8 @@ ROUTES = [
     (r"change (the )?(text|copy|layout)|make it look like|add .* to the app|app change", "app-change-loop"),
     (r"walk it as a user|phone and laptop|can the partner see|click-?through|ux qa", "app-ux-clickthrough-qa"),
     (r"keep an eye on it|watch the q&a|launch watch|after (the )?launch", "launch-watch"),
+    (r"playwright|screenshot (the|of the) (app|page|site)|test (the|our) (web ?app|site|page)|browser (console|logs)", "webapp-testing"),
+    (r"new (ui|page|landing|design)|redesign|look(s)? (generic|templated|bland)|visual design|typography", "frontend-design"),
     (r"contract|ok to sign|checklist.*(hotel|venue)|fill in and return|order form", "contract-vs-offer-review"),
 ]
 try:
