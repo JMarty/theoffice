@@ -28,6 +28,8 @@
 "agents/toby/agent.json": "04f6bdfa9c6f6fcf2c438b31df2bf3bef07a8171a4a62eefc32c942741bad82a",
 "scheduled-tasks/agent-watchdog/SKILL.md": "0c29c8b22bb8717d8af0e0660821b9c42f43add8dfb5c17f13319ddaddee7472",
 "scheduled-tasks/agent-watchdog/task-config.json": "d0220e5cb80236ac29c5f60ec8a4752420e0cad4a0e8d16e1b58c8a409ce2b20",
+"scheduled-tasks/dream-engine/SKILL.md": "e4cda4d6a8b749543ccfc9fff7e06357a16608eae178ae4bcce7ed2b7409f43c",
+"scheduled-tasks/dream-engine/task-config.json": "e686d86c6889ec7a407b0dae37523b7a0fc7568243c74d55404dfee915b088a5",
 "scheduled-tasks/kanban-audit/SKILL.md": "6f1a09f9da426b0fd1fd750bf4b72de424e00752a474bde58ad32060f31e9216",
 "scheduled-tasks/kanban-audit/task-config.json": "6c19d6cb6e21821a96819b5d5ec0b2cbd62639bb3f8ba726a80c39f621372920",
 "scheduled-tasks/memoria-heartbeat/SKILL.md": "da3f967a7a4f661b0394a1155e6998289479c2f761c1a24ce7c758bdc26d5ad9",

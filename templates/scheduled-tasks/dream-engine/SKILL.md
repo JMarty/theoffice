@@ -1,95 +1,81 @@
 ---
 name: dream-engine
-description: Nightly "dream" (05:00, before the morning briefing) - consolidate the fleet's memory, retire stale hot memories to cold (never delete), rank tomorrow's top 3, and write DREAM.md for the briefing. Silent.
+description: Nightly analysis of the day's memories, daily logs and kanban state. Consolidates memory, builds the skills it proposes, ranks tomorrow's top 3, writes DREAM.md for the morning briefing. Silent.
 ---
 
-# Dream Engine (nightly, silent)
+You are running the nightly "Dream Engine" loop. The owner is asleep: do NOT message any channel. The goal is to consolidate the day's knowledge and prepare the morning briefing with a short, prioritised list.
 
-You are running the nightly Dream Engine. The operator is asleep: **do NOT message anyone.** The only
-output is one file, `$OFFICE_TENANT_ROOT/DREAM.md`, overwritten each night. The morning briefing reads it
-and passes on only what matters.
+Write `DREAM.md` (path: the office's briefing directory) from the five buckets below. Format at the end.
 
-*Set up*
+## Bucket 1: skill proposals (fleet-wide) and BUILD
 
-    TOKEN=$(cat "$OFFICE_TENANT_ROOT/store/.dashboard-token")
-    API=http://127.0.0.1:${OFFICE_PORT:-3430}/api
-    curl -s -H "Authorization: Bearer $TOKEN" "$API/agents"     # the fleet
-    date                                                         # local time, use it for every "24h" / "7 days"
+Go through every agent's memories and daily log of the last 24 hours (API only, there is no direct database access):
 
-Use the runtime API for every read and write. **Never touch the SQLite files directly** (the runtime is the
-only DB authority; a direct write can land in the wrong database and nobody notices).
+```bash
+TOKEN=$(cat $OFFICE_TENANT_ROOT/store/.dashboard-token)
+for cat in hot warm; do curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:3430/api/memories?category=$cat&limit=500"; done
+# filter on created_at in the last 24 h
+```
 
-## Bucket 1 - Skill ideas (fleet-wide)
+Look for: a manual action repeated 3 or more times that fits a skill, or a new pattern no skill covers. Output 0-2 proposals, each with a title, one sentence of reasoning, and "fleet-wide" or "agent: <name>".
 
-Read every agent's memories and daily logs from the last 24h:
+**BUILD, do not only propose.** Every skill proposed here is also written the same night:
+1. Read the real source work (memories, logs, the relevant files) the pattern comes from. Never invent steps.
+2. Write `~/.claude/skills/<name>/SKILL.md` (frontmatter name + description; When to use / Procedure / Pitfalls / Verification). If a similar skill exists, patch it instead of duplicating.
+3. Add its trigger to the skill router: append `["regex", "<name>"]` to `$OFFICE_TENANT_ROOT/config/skill-routes.json` and test with `echo '{"prompt":"<typical request>"}' | python3 tools/skill-router/route.py` (it must print output).
+4. EXCEPTION: if the skill would change how the agent talks to the owner or a third party (email, customer, order, payment), do NOT activate it. Write it as `SKILL.md.draft` and ask for approval in the briefing.
+5. Mark it in DREAM.md as "BUILT: <name> (<path>)" or "DRAFT, approval needed: <name>". The briefing prints "built: X", not "idea: X".
 
-    for c in hot warm; do curl -s -H "Authorization: Bearer $TOKEN" "$API/memories?category=$c&limit=500"; done
-    curl -s -H "Authorization: Bearer $TOKEN" "$API/daily-logs?limit=200"
+## Bucket 2: memory health (never delete, move to cold)
 
-Filter on `created_at` to the last 24h. Look for a manual job done 3+ times, or a new pattern no existing
-skill covers. Output 0-2 ideas: title + one-sentence reason + "fleet-wide" or "agent: <id>".
+1. Report how many memories are not vectorised yet (the embedding job fixes them; you only check).
+2. Hot/warm memories with `accessed_at` older than 7 days move to the cold tier through the API, never a delete:
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "http://127.0.0.1:3430/api/memories/<ID>/category" -d '{"category":"cold"}'
+# 404 = no such id; {"ok":true,...} = done
+```
+3. Exact duplicates: report them and move one copy to cold.
 
-## Bucket 2 - Memory health (move to cold, NEVER delete)
+Output: a short statistic.
 
-From the same hot list, find memories with `accessed_at` older than 7 days, and exact duplicate `content`
-(keep the newest, retire the rest). Move each to cold:
+## Bucket 3: project priorities (top 3 for tomorrow)
 
-    curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-      "$API/memories/<ID>/category" -d '{"category":"cold"}'
-    # {"ok":true,...} = moved; 404 = no such id
+Read the open kanban cards (`GET /api/kanban`), keep planned / in_progress / waiting, group by project and priority, and weigh by activity in the daily logs of the last 7 days. Output three lines: `<project>: <card or action>: <one-sentence reason>`.
 
-Cold is still searchable, so nothing is lost. Also count memories without an embedding (the embedding job
-fills them itself; you only report the number). Output one line of counts.
+## Bucket 4: external opportunities (once or twice a week, not nightly)
 
-If the operator has said tier changes need their approval, do not move anything: list the ids in DREAM.md
-and ask once in the briefing instead.
+Web-search for new agentic-AI or productivity skill repositories (more than 100 stars, commits in the last 90 days, clear README). Skip if a recommendation was already made in the last 7 days. Output at most one repository URL with one sentence on why it is relevant.
 
-## Bucket 3 - Top 3 for today
+## Bucket 5: skill fleet health (unpinned skills only)
 
-    curl -s -H "Authorization: Bearer $TOKEN" "$API/kanban"
+List skills without `pinned: true` in the frontmatter. Output 0-3 suggestions: "skill <name> looks stale (no use in 30+ days), update or remove".
 
-Take cards in planned / in_progress / waiting, group by project, weigh priority against movement in the
-last 7 days of daily logs (and `$OFFICE_TENANT_ROOT/GOALS.md` if present). Output exactly 3 lines:
-`<project>: <card / action> - <one-sentence reason>`.
+## Output format (DREAM.md)
 
-## Bucket 4 - External opportunity (weekly only)
+```markdown
+# Dream Engine: <date> <time>
 
-Skip unless the marker `$OFFICE_TENANT_ROOT/scheduled-tasks/dream-engine/.external-last-run` is missing or
-older than 7 days. Then web-search for one new Claude Code / agentic skill repo (100+ stars, commits in the
-last 90 days, clear README) relevant to this operator, and touch the marker. Output max 1 line: URL + why.
+## Skill proposals
+- (or "Nothing new")
 
-## Bucket 5 - Skill health (weekly only, same marker day)
+## Memory health
+<n> / <n> vectorised, <n> hot to cold, <n> duplicates.
 
-List skills under `~/.claude/skills/` with no `pinned: true` in their frontmatter that look unused for 30+
-days. Output 0-3 lines: "skill <name>: unused 30+ days, update or remove?". Never delete a skill yourself.
+## Top 3 for tomorrow
+1. <project>: <action>: <reason>
+2. ...
+3. ...
 
-## DREAM.md format
+## External opportunity
+- (or "Skipped, weekly limit" / "Nothing relevant")
 
-    # Dream Engine - YYYY-MM-DD HH:MM
-
-    ## Skill ideas
-    - ... (or "No new ideas")
-
-    ## Memory health
-    N / N vectorised, X hot->cold, Y duplicates retired.
-
-    ## Top 3 for today
-    1. ...
-    2. ...
-    3. ...
-
-    ## External opportunity
-    - ... (or "Skip - weekly")
-
-    ## Skill health
-    - ... (or "All skills active or pinned")
-
-    ## Errors
-    - only if something failed (API down, 4xx/5xx, missing token). Never hide a failure.
+## Skill fleet health
+- (or "All skills active or pinned")
+```
 
 ## Rules
 
-- Silent. No office-say, no bus message. DREAM.md is the whole output.
-- Never delete a memory, a card or a skill. Moving to cold is the strongest action allowed.
-- The morning briefing should read `$OFFICE_TENANT_ROOT/DREAM.md` and include the Top 3 plus anything that
-  needs the operator. If your briefing task does not read it yet, add that line to the briefing task.
+- Never message a channel. DREAM.md is picked up by the morning briefing.
+- All commands are local; no external API calls except the optional web search in bucket 4.
+- If something blocks you (database lock, missing embedding model), add an `## Errors` section at the end of DREAM.md.
