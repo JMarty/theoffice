@@ -10,6 +10,8 @@ try:
     prompt = json.load(sys.stdin).get("prompt", "") or ""
 except Exception:
     sys.exit(0)
+if "<task-notification>" in prompt or "SYSTEM NOTIFICATION - NOT USER INPUT" in prompt:
+    sys.exit(0)  # background-task events are not tasks
 p = prompt.lower()
 
 ROUTES = [
@@ -46,6 +48,13 @@ ROUTES = [
     (r"youtube\.com|youtu\.be|research this|knowledge base", "knowledge-scout"),
     (r"token usage|usage report|which agent is eating", "fleet-token-usage-breakdown"),
     (r"nav ?(számla|navision)|navision", "forch-nav-navision-skill"),
+    (r"claude login|auth login|refresh token|renew the claude", "claude-login-renewal"),
+    (r"recording|transcri|who said what", "local-meeting-transcribe"),
+    (r"demo video|walkthrough video|screen recording", "demo-video-recorder"),
+    (r"change (the )?(text|copy|layout)|make it look like|add .* to the app|app change", "app-change-loop"),
+    (r"walk it as a user|phone and laptop|can the partner see|click-?through|ux qa", "app-ux-clickthrough-qa"),
+    (r"keep an eye on it|watch the q&a|launch watch|after (the )?launch", "launch-watch"),
+    (r"contract|ok to sign|checklist.*(hotel|venue)|fill in and return|order form", "contract-vs-offer-review"),
 ]
 try:
     _tenant = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
