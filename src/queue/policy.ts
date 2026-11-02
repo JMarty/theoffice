@@ -90,6 +90,24 @@ export function permissionPromptAlarmText(agentId: string, socket: string, sessi
   );
 }
 
+/**
+ * Owner rule 2026-11-02: permission / approval prompts on ANY agent are decided by marveen or darryl, NEVER by the owner.
+ * So this alarm goes to the decider on the inter-agent bus, not to the owner's Slack. The captured prompt text is included so the
+ * decider can judge it; the pane is never touched by the sweeper.
+ */
+export function permissionPromptDecider(agentId: string): string {
+  return agentId === "marveen" ? "darryl" : "marveen";            // a frozen marveen cannot decide for itself
+}
+
+export function permissionPromptBusText(agentId: string, socket: string, session: string, prompt: string): string {
+  const shown = prompt.replace(/\s+/g, " ").trim().slice(-450);
+  return (
+    `PERMISSION PROMPT: ${agentId} is frozen on an approval prompt (sweeper did NOT touch it; clearing blind would approve whatever asked). ` +
+    `You decide, not the owner. Read: tmux -L ${socket} capture-pane -p -t ${session} | tail -25, then approve/reject by hand ` +
+    `(clear-agent-modal-safely: verify the highlight first, never a bare Enter). Prompt: ${shown}`
+  );
+}
+
 // Compile-time guard: keep this list of the values we branch on honest against the QueueSource union.
 // If a new source is added to types.ts, TypeScript flags this so the policy above is revisited.
 const _SOURCES: Record<QueueSource, true> = {
