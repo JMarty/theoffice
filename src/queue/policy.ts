@@ -78,19 +78,6 @@ export function ownerStallAlarmText(agentId: string, minutesWaiting: number, pro
 }
 
 /**
- * The alarm for an agent frozen on a permission/approval gate. The sweeper deliberately did NOT touch
- * it (clearing it would blind-approve the action), so a human must decide. Tells them how to look. Pure.
- */
-export function permissionPromptAlarmText(agentId: string, socket: string, session: string): string {
-  return (
-    `⚠️ *${agentId}* is frozen on a permission/approval prompt. I did NOT touch it — clearing it would ` +
-    `blind-approve whatever asked for authorisation (an edit / command / push / payment). A human needs ` +
-    `to decide: \`tmux -L ${socket} attach -t ${session}\`, then approve or reject by hand. The agent ` +
-    `stays frozen until then, which is the safe state.`
-  );
-}
-
-/**
  * Owner rule 2026-11-02: permission / approval prompts on ANY agent are decided by marveen or darryl, NEVER by the owner.
  * So this alarm goes to the decider on the inter-agent bus, not to the owner's Slack. The captured prompt text is included so the
  * decider can judge it; the pane is never touched by the sweeper.
@@ -100,7 +87,7 @@ export function permissionPromptDecider(agentId: string): string {
 }
 
 export function permissionPromptBusText(agentId: string, socket: string, session: string, prompt: string): string {
-  const shown = prompt.replace(/\s+/g, " ").trim().slice(-450);
+  const shown = prompt.replace(/\s+/g, " ").replace(/[A-Za-z0-9_\-+\/=]{28,}/g, "[long string removed]").trim().slice(-450);          // a pane tail can hold a token or key: long opaque strings never go on the bus
   return (
     `PERMISSION PROMPT: ${agentId} is frozen on an approval prompt (sweeper did NOT touch it; clearing blind would approve whatever asked). ` +
     `You decide, not the owner. Read: tmux -L ${socket} capture-pane -p -t ${session} | tail -25, then approve/reject by hand ` +

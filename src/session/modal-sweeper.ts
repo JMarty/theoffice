@@ -179,17 +179,3 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
     clearInterval(handle);
   };
 }
-
-/** Pane-independent owner alarm: post to the owner via the Slack bot (bypasses the broken pane). */
-function alarmOwner(cfg: EngineConfig, text: string): void {
-  const channel = cfg.owner.slackUserId;
-  if (!channel) {
-    logger.error("no owner slack id configured — cannot raise a pane-independent alarm");
-    return;
-  }
-  try {
-    enqueueOutbound(cfg.mainAgentId, channel, text);
-  } catch (err) {
-    logger.error({ err }, "failed to enqueue owner alarm");
-  }
-}
