@@ -172,7 +172,9 @@ def _alert_edges():
 
 def _say(text):
     env = dict(os.environ, OFFICE_AGENT_ID="service-health")
-    subprocess.run([f"{TENANT}/../tools/agent-msg/agent-msg", ALERT_TO, text[:700]], env=env, capture_output=True, text=True, timeout=30)
+    r = subprocess.run([f"{TENANT}/../tools/agent-msg/agent-msg", ALERT_TO, text[:700]], env=env, capture_output=True, text=True, timeout=30)
+    if r.returncode != 0 or "sent id=" not in (r.stdout or ""):
+        print("alert not sent:", (r.stdout or r.stderr or "")[:120], file=sys.stderr)
 
 
 try:
