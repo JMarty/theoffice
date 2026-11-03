@@ -144,5 +144,45 @@ with open(tmp, "w") as f:
     json.dump(snapshot, f, indent=1)
 os.replace(tmp, HEALTH_FILE)
 
+# ---- edge-triggered alert (2026-11-03: nothing consumed this file in real time; a SIGTERM'd unit is inactive, not failed, so watchd never saw it)
+# One bus line to the infra agent when a unit ENTERS unhealthy/unknown (after 2 consecutive runs = ~10 min, so a restart blip is silent), one when it RECOVERS.
+# State: store/service-health-alerted.json {"streak": {unit: n}, "alerted": [unit, ...]}. No AI, never raises.
+ALERT_STATE = f"{TENANT}/store/service-health-alerted.json"
+ALERT_TO = os.environ.get("SERVICE_HEALTH_ALERT_TO", "darryl")
+ALERT_AFTER_RUNS = 2
+
+
+def _alert_edges():
+    try:
+        st = json.load(open(ALERT_STATE))
+    except Exception:
+        st = {}
+    streak, alerted = st.get("streak", {}), set(st.get("alerted", []))
+    cur = {u["unit"]: (u.get("note") or f"last success {u.get('hours_since')} h ago") for u in unhealthy}
+    cur.update({u["unit"]: "unknown: " + str(u.get("reason", "?")) for u in unknown})
+    streak = {u: streak.get(u, 0) + 1 for u in cur}
+    new = sorted(u for u in cur if streak[u] >= ALERT_AFTER_RUNS and u not in alerted)
+    back = sorted(alerted - set(cur))
+    alerted = (alerted | set(new)) - set(back)
+    os.makedirs(os.path.dirname(ALERT_STATE), exist_ok=True)
+    json.dump({"streak": streak, "alerted": sorted(alerted)}, open(ALERT_STATE + ".tmp", "w"))
+    os.replace(ALERT_STATE + ".tmp", ALERT_STATE)
+    return [(u, cur[u]) for u in new], back
+
+
+def _say(text):
+    env = dict(os.environ, OFFICE_AGENT_ID="service-health")
+    subprocess.run([f"{TENANT}/../tools/agent-msg/agent-msg", ALERT_TO, text[:700]], env=env, capture_output=True, text=True, timeout=30)
+
+
+try:
+    _new, _back = _alert_edges()
+    if _new:
+        _say("SERVICE-HEALTH DOWN: " + "; ".join(f"{u} ({n})" for u, n in _new)[:560] + ". Check: systemctl --user status <unit>; restart if it is a client demo.")
+    if _back:
+        _say("SERVICE-HEALTH recovered: " + ", ".join(_back))
+except Exception as _e:      # the alert must never break the producer
+    print("alert step failed:", type(_e).__name__, file=sys.stderr)
+
 if "--print" in sys.argv:
     print(json.dumps(snapshot, indent=1))
