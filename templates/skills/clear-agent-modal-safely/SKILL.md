@@ -52,7 +52,7 @@ trap 'rm -rf -- "$WORK"' EXIT     # no bare rm anywhere
 - An agent can sit frozen for HOURS with nobody noticing (cfo: 2h40m, mid an owner-facing task).
   Delivery to that pane is gated shut, so inbound parks with attempts=0 and never alarms on its own.
 - The permission alarm routing through a single relay agent is a SPOF: if the relay is itself frozen,
-  the alarm goes nowhere. Dangerous-op gates go to marveen on the bus (darryl if marveen is the frozen pane), never to the owner (owner rule 2026-11-02).
+  the alarm goes nowhere. Dangerous-op gates should reach the owner directly.
 - Do not let an automated sweeper handle permission prompts. Detection without action is strictly
   safer; only the exact usage-limit signature with the cursor provably on the safe option may be
   auto-dismissed.
@@ -60,7 +60,7 @@ trap 'rm -rf -- "$WORK"' EXIT     # no bare rm anywhere
 ## Break-glass sweeper (emergency only — the engine normally owns this)
 The live path for usage-limit dismissal is the IN-ENGINE session-hygiene sweeper (theoffice.service,
 `src/session/modal-sweeper.ts`): highlight-verified Stop-and-wait dismissal PLUS permission/dangerous-op
-alarm that goes to the decider on the bus (marveen; darryl if marveen is the frozen pane) with the captured prompt text, never to the owner's Slack. It runs automatically on a ~20s tick — you should not normally need a standalone tool.
+alarm, owner-direct. It runs automatically on a ~20s tick — you should not normally need a standalone tool.
 
 A RETIRED standalone fallback is kept on disk at `tools/modal-sweeper/modal_sweeper.py` (out of git;
 its timer was disabled 2026-08-04 when the in-engine sweeper superseded it). Use it ONLY if the
