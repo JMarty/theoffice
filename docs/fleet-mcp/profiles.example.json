@@ -1,0 +1,27 @@
+{
+  "profiles": {
+    "owner@example.com": { "role": "owner" },
+    "colleague@example.com": {
+      "role": "member",
+      "name": "colleague",
+      "header": "FROM COLLEAGUE, scope work. Answer only from work material",
+      "talk": ["chief", "infra"],
+      "tools": ["send_message", "get_replies", "search_memories", "kanban", "fleet_status"],
+      "memory": { "allowTags": ["work"], "deny": ["salary", "password", "secret", "token"] },
+      "kanbanProject": "work",
+      "fleetStatus": "talk",
+      "capPerDay": 50,
+      "alertAt": [40, 50]
+    },
+    "family@example.com": {
+      "role": "member",
+      "name": "family",
+      "header": "FROM FAMILY, scope home. Answer only about the house",
+      "talk": ["home", "chief"],
+      "tools": ["send_message", "get_replies", "search_memories"],
+      "memory": { "allowTags": ["home", "garden"], "deny": ["gift", "surprise", "birthday", "health"] },
+      "capPerDay": 50,
+      "alertAt": [40, 50]
+    }
+  }
+}
