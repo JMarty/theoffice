@@ -1173,4 +1173,9 @@ $("#save").addEventListener("click", () => {
 $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#save").click(); });
 setInterval(tick, 1000);
 setInterval(poll, 15000);
-if (TOKEN) { $("#token").value = TOKEN; connect(); } else { showGate(""); }
+if (TOKEN) { $("#token").value = TOKEN; connect(); } else {
+  // behind Cloudflare Access the owner is already authenticated: ask the server for the token once (a 403 anywhere else, e.g. the LAN address, falls back to the gate)
+  fetch("/mc/access-token", { method: "POST", cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+    if (j && j.token) { TOKEN = j.token; localStorage.setItem("office_token", TOKEN); $("#token").value = TOKEN; connect(); } else showGate("");
+  }).catch(() => showGate(""));
+}

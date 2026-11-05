@@ -240,6 +240,24 @@ export function startServer(cfg: EngineConfig): () => void {
       if (was && cfg.owner.slackUserId) enqueueOutbound(cfg.mainAgentId, cfg.owner.slackUserId, `Fleet thawed from the dashboard (${r.email}). Agents can work again.`);
       return json(res, 200, freezeState(cfg));
     }
+    // Mission Control behind Cloudflare Access: on a configured public host, the OWNER's valid Access JWT (signature, issuer, audience, expiry, email) hands the browser the dashboard
+    // token, so the UI does not ask for it. Off unless cfAccess.tokenHosts names the host; the LAN/direct address has no such host and no JWT, so nothing changes there. Same-origin only.
+    if (path === "/mc/access-token") {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const hosts = (cfg.web.cfAccess?.tokenHosts ?? []).map((h) => h.toLowerCase());
+      const host = String(req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+      const site = req.headers["sec-fetch-site"];
+      if (!hosts.includes(host) || (typeof site === "string" && site !== "same-origin")) return json(res, 403, { error: "forbidden" });
+      const r = await verifyAccessJwt(
+        typeof req.headers["cf-access-jwt-assertion"] === "string" ? (req.headers["cf-access-jwt-assertion"] as string) : undefined,
+        cfg.web.cfAccess ?? { teamDomain: "", audiences: [], ownerEmail: "" },
+        _now(),
+        (refresh) => jwksProvider(refresh)
+      );
+      if (!r.ok) { logger.warn({ reason: r.reason }, "mc access-token refused"); return json(res, 403, { error: "forbidden" }); }
+      res.setHeader("Cache-Control", "no-store");
+      return json(res, 200, { token });
+    }
     if (path.startsWith("/api/")) {
       const ip = getClientIp(req, cfg.web.trustedProxyToken);
       const rl = cfg.web.rateLimit || { maxFails: 5, windowMs: 900000, blockMs: 60000, maxBlockMs: 3600000 };
