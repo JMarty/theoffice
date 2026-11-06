@@ -190,13 +190,14 @@ describe("review fixes A/B/D", () => {
     expect(memoryRowAllowed(g2, row("Shared BERLET plan", "work"))).toBe(false);
     expect(memoryRowAllowed(g2, row("PAYROLL_SPLIT accounts", "work"))).toBe(false);
   });
-  it("short deny phrases (4 characters or fewer) match whole words only: nav blocks NAV but not navigation", () => {
-    const g3 = { ...g, deny: ["nav", "card"] };
+  it("deny phrases match as substrings (so plurals and compounds are caught); a leading = makes a phrase whole-word only", () => {
+    const g3 = { ...g, deny: ["gift", "bank", "loan", "tax", "=nav"] };
+    for (const t of ["two gifts planned", "bankban tartott", "bankszamla", "several loans", "unpaid taxes"])
+      expect(memoryRowAllowed(g3, row(t, "work"))).toBe(false);
     expect(memoryRowAllowed(g3, row("Navigation bar fix", "work"))).toBe(true);
-    expect(memoryRowAllowed(g3, row("cardinality of the table", "work"))).toBe(true);
     expect(memoryRowAllowed(g3, row("NAV debt letter", "work"))).toBe(false);
-    expect(memoryRowAllowed(g3, row("the card on file", "work"))).toBe(false);
-    expect(memoryRowAllowed({ ...g, deny: ["work-proj"] }, row("a work proj note", "work"))).toBe(false); // long phrases stay substring matches
+    expect(memoryRowAllowed(g3, row("the nav-bar", "work"))).toBe(false);
+    expect(memoryRowAllowed({ ...g, deny: ["work-proj"] }, row("a work proj note", "work"))).toBe(false);
   });
   it("A1: a member's memory search covers only the agents on the talk list", () => {
     expect(memoryAgents(h, routing)).toEqual(["home", "chief", "infra", "coord"]);

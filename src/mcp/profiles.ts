@@ -141,13 +141,16 @@ const tagsOf = (keywords: string) =>
       const t = ph.trim();
       return t ? [t, ...t.split(/[^a-z0-9-]+/).filter(Boolean)] : [];
     });
-// Short phrases ("nav", "card") match whole words only, so they do not hide "navigation" or "cardinality"; longer phrases match as substrings.
+// Deny phrases match as substrings after normalisation, so "gift" also catches "gifts" and "bank" also catches "bankszamla". A phrase that starts with "="
+// is whole-word only (for a short word that would otherwise hide harmless text, e.g. "=nav" does not hide "navigation").
 const blocked = (p: Profile, text: string): boolean => {
   const n = norm(text);
   return p.deny.some((d) => {
-    const w = norm(d);
-    if (w.length > 4) return n.includes(w);
-    return new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(n);
+    if (d.startsWith("=")) {
+      const w = norm(d.slice(1));
+      return !!w && new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(n);
+    }
+    return n.includes(norm(d));
   });
 };
 export function memoryRowAllowed(p: Profile, row: { content?: unknown; keywords?: unknown }): boolean {
