@@ -23,7 +23,7 @@ user-facing string, Darryl builds + deploys, Toby QAs, marveen checks before the
    - *exact final copy*, written by me and read as the END USER (no organiser notes: "extended", "confirmed by hotel",
      "requested via Perk"; bold only for titles; lists as lists - owner 10-27).
    - a *Must NOT appear* list (old strings, prices, "confirmed" when it is not, names that must stay private).
-   - a *Done when* list: screenshots at the widths (light + dark if the app has dark), the live grep for absence/presence,
+   - a size label (xs/s/m/l/xl) and a *Done when* list of numbered, verifiable DoD lines (rules: engineering-discipline-gates, 'Adopted from the Marvin kit'): screenshots at the widths (light + dark if the app has dark), the live grep for absence/presence,
      Toby re-check scope, "bus marveen ONE line with deploy id + rollback id", "do not send the link to anyone".
    Example: `agents/marveen/strategy-day-ams/APP-UPDATE-TRANSFERS-20261030.md`.
    Copy-only iteration (the company site): ONE payload file with exact OLD -> NEW strings; inline bus strings got clipped and

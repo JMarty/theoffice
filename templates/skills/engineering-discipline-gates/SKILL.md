@@ -65,3 +65,22 @@ Before sending anyone a link whose behaviour depends on stored fields (reschedul
 
 ## Check
 Before merge/claim: did a test fail red first? did you run the proof command this turn and read its output? if you fixed a bug, did you name the root cause? if you delegated, did you read the diff? UI: did you look at the rendered screenshots at both widths? Third-party fetch: did you see their request in the tail? Special link: did you read the stored row back?
+
+## Adopted from the Marvin agent-operating-kit (owner 2026-11-06: "already go in general, we roll back if we don't like it"; backup of the pre-change file in agents/marveen/work/process/)
+1. *DoD before build.* No build starts without numbered, verifiable done-statements in the spec (behaviour, tests, docs/CHANGELOG, env/deploy). "Looks good" is not a DoD line.
+2. *Size label on every task:* xs (mechanical, fully specified) / s / m / l / xl, written in the spec and on the kanban card title ("[s]").
+3. *Model by size:* xs -> Haiku sub-agent; s -> Sonnet; m/l/xl -> the agent's own model. A failed round climbs one step (effort, then tier); the builder never self-escalates to "done".
+4. *Fresh validator, two passes:* the builder never validates its own work. Pass 1 completion (tries to FALSIFY each DoD line, browser for anything web-facing), pass 2 security (secrets, auth, data exposure, dependencies). Toby or a fresh sub-agent; record both verdicts.
+5. *Final-message contract* for every sub-agent / delegated build: what was done per DoD line, evidence (command + output or file path), files changed, open risks. A report without evidence per line = not done.
+6. *Session budget:* at ~70% context write a handoff note; at ~80% finish the current step only; at ~90% stop and compact. Darryl's CTX-COMPACT notices are the trigger.
+7. *Dependency + secrets discipline in every brief:* name the security surface; new dependencies pinned and justified; secrets never in briefs, cards, bus or commits.
+8. *Card labels for statistics:* type (feature/fix/chore/docs), area (crm/site/demo/infra/home), size, origin (owner/agent/qa) in the card title or body, so a weekly digest can count them.
+
+### Adopted round 2 (owner 2026-11-06 01:4x, after reading the whole kit README)
+9. *Escalation by failure pattern, not by retry count:* after a failed round name the pattern: converging (stay), stuck (raise effort, then model tier), whack-a-mole / bloat / loop (STOP retrying and hand the problem to a new pair of eyes who must propose another route; shrink the scope only with the owner's yes), spending out of proportion (pause and ask the owner). Max 4 rounds per rung.
+10. *Guardrails, four dispositions:* every "do not" must end in exactly one reaction: take the safe alternative, stop and ask what was meant, ask whoever owns the decision, or leave it out and say so. A blocked sub-agent commits its safe work and names the exact block; silence is NEVER approval.
+11. *Bounded runs:* any multi-round or fan-out job states up front GOAL, numeric LIMITS (rounds, agents, tokens, minutes), a POSITIVE exit and a NEGATIVE exit, and reports between rounds.
+12. *Bug-hunt and stress-test as standard QA tools (Toby):* bug-hunt = several sub-agents, each attacking from a different direction, hunt for bugs; their candidates are re-checked and only confirmed ones are filed (report only, never touch live). Stress-test = every growth dimension at 3-5x expected production scale (rows, files, users, payload size), findings filed with the scale that broke it. Run both before any client go-live.
+13. *Docs taxonomy per repo* (with the handbooks): docs/plans (decided, not done), docs/research (what investigations found), docs/tech-debt (known debt + the cleanup it needs), docs/future (deliberately deferred ideas), docs/decisions.md, docs/release-notes, each with an index. PROJECT-INFO.md per repo: audience, size, app type, stack, owner, live URL, deploy path.
+14. *Code docblocks:* every new or changed public function/class gets a contract docblock in whatever form that language normally uses (TSDoc/JSDoc, PEP 257); inline comments only for the non-obvious WHY.
+15. *Collect once, render many:* reports (weekly digest, project close-out, a client-facing progress page) read ONE snapshot; a client/stakeholder render never shows agent names, tiers, internal labels or process.
