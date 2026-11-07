@@ -55,7 +55,7 @@ interface TokenRec {
   kind: "access" | "refresh";
   grant: string;
   exp: number;
-  used?: boolean;
+  used?: number | boolean; // epoch seconds of the first use (true = a first-version record, no time known)
 }
 interface State {
   clients: Record<string, OAuthClientInformationFull>;
@@ -67,6 +67,9 @@ interface State {
 const dict = <T>(o?: Record<string, T>): Record<string, T> =>
   Object.assign(Object.create(null) as Record<string, T>, o);
 const MAX_PENDING = 300;
+// claude.ai retries a refresh whose reply it lost. A second use of a just-rotated token within this window rotates again instead of
+// revoking the grant (that signed the owner out); a replay after it still revokes.
+const REFRESH_GRACE_S = 60;
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 const rand = () => crypto.randomBytes(32).toString("base64url");
@@ -349,11 +352,16 @@ export class FleetOAuth implements OAuthServerProvider {
     const g = this.st.grants[rec.grant];
     if (!g || g.revoked || g.clientId !== client.client_id) throw new InvalidGrantError("invalid refresh token");
     if (rec.used) {
-      this.revokeGrant(rec.grant);
-      this.cfg.audit("refresh-reuse-revoked", { denied: true, client: client.client_id });
-      throw new InvalidGrantError("refresh token reused");
+      const at = typeof rec.used === "number" ? rec.used : 0;
+      if (now() - at > REFRESH_GRACE_S) {
+        this.revokeGrant(rec.grant);
+        this.cfg.audit("refresh-reuse-revoked", { denied: true, client: client.client_id });
+        throw new InvalidGrantError("refresh token reused");
+      }
+      this.cfg.audit("refresh-retry-in-grace", { client: client.client_id });
+      return this.issue(rec.grant); // the grace runs from the FIRST use: `used` is not renewed here
     }
-    rec.used = true;
+    rec.used = now();
     return this.issue(rec.grant);
   }
 

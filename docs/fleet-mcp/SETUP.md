@@ -47,6 +47,8 @@ Never commit real addresses, hostnames, client ids or secrets to the repo; the e
 
 ## Operations
 
+- Sessions and the state file (`mcp-oauth.json`): never edit it by hand. To take someone off, delete their address from the profiles file: their tokens stop working at once (checked on every call) and nothing is deleted, so putting the address back restores the session. A grant without an e-mail is the first version's owner grant and is not tied to the list. Restarts and profile edits never remove a grant (`src/mcp/grants-survive.test.ts`). On 2026-11-07 a hand-edit that dropped every grant without an e-mail signed the owner out.
+- Refresh tokens rotate on every use. A second use of the same one within 60 seconds (claude.ai retries when it lost the reply) rotates again and keeps the session; a replay after that revokes the grant.
 - Kill switch: create the file named by `OFFICE_MCP_DISABLED_FILE` (default `<tenant>/store/mcp.disabled`); every request answers 503. Remove it to resume. Reading the flag fails closed. Too many denied owner-login events in ten minutes create it by themselves.
 - Revoke everything: stop the service, delete the state file (`OFFICE_MCP_STATE_FILE`), start. Everyone signs in again.
 - Remove a person: delete their profile and restart; their token stops working at the next call.

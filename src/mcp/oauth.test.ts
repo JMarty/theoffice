@@ -144,7 +144,7 @@ describe("fleet mcp sign-in", () => {
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   });
 
-  it("signs the allowed owner in, serves tools, rotates and revokes on refresh reuse", async () => {
+  it("signs the allowed owner in, serves tools, rotates and tolerates a retried refresh", async () => {
     const s = await signIn();
     expect(s.g.host).toBe("accounts.google.com");
     expect(s.cb.status).toBe(302);
@@ -171,8 +171,8 @@ describe("fleet mcp sign-in", () => {
     expect(r1.status).toBe(200);
     const n = (await r1.json()) as Record<string, string>;
     expect((await toolsList(n.access_token)).status).toBe(200);
-    expect((await refresh(t.json.refresh_token!)).status).toBe(400); // reuse of the old one
-    expect((await toolsList(n.access_token)).status).toBe(401); // whole grant revoked
+    expect((await refresh(t.json.refresh_token!)).status).toBe(200); // a retry inside the grace window rotates again (see grants-survive.test.ts for the replay after it)
+    expect((await toolsList(n.access_token)).status).toBe(200);
   });
 
   it("refuses a second Google account and an unverified address", async () => {
