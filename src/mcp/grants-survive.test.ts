@@ -95,17 +95,32 @@ describe("grants survive restarts and profile edits", () => {
 });
 
 describe("a retried refresh does not sign the owner out", () => {
+  it("after a restart lost the first reply, one more rotation is allowed and a third use revokes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await start(["owner@example.com"]);
+    expect((await refresh("rt-owner")).status).toBe(200);
+    await stop();
+    await start(["owner@example.com"]); // the in-memory reply is gone
+    expect((await refresh("rt-owner")).status).toBe(200);
+    expect((await refresh("rt-owner")).status).toBe(400);
+  });
+
   it("reusing a refresh token inside the grace window rotates again and keeps the grant; after it, the grant is revoked", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     await start(["owner@example.com"]);
     const first = await refresh("rt-owner");
     expect(first.status).toBe(200);
     const a1 = ((await first.json()) as Record<string, string>).access_token!;
-    const retry = await refresh("rt-owner"); // claude.ai retries: the reply to the first call was lost
-    expect(retry.status).toBe(200);
-    const a2 = ((await retry.json()) as Record<string, string>).access_token!;
+    const before = Object.keys(onDisk().tokens).length;
+    let a2 = a1;
+    for (let i = 0; i < 5; i++) {
+      const retry = await refresh("rt-owner"); // claude.ai retries: the reply to the first call was lost
+      expect(retry.status).toBe(200);
+      a2 = ((await retry.json()) as Record<string, string>).access_token!;
+      expect(a2).toBe(a1); // the same reply every time
+    }
+    expect(Object.keys(onDisk().tokens)).toHaveLength(before); // five retries mint no new chain
     expect((await tools(a1)).status).toBe(200);
-    expect((await tools(a2)).status).toBe(200);
     vi.setSystemTime(Date.now() + 61_000);
     expect((await refresh("rt-owner")).status).toBe(400); // a real replay, long after: revoke the grant
     expect((await tools(a2)).status).toBe(401);

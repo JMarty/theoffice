@@ -56,6 +56,7 @@ interface TokenRec {
   grant: string;
   exp: number;
   used?: number | boolean; // epoch seconds of the first use (true = a first-version record, no time known)
+  retried?: boolean; // one extra rotation was allowed inside the grace window (only after a restart lost the first reply)
 }
 interface State {
   clients: Record<string, OAuthClientInformationFull>;
@@ -132,6 +133,8 @@ export class FleetOAuth implements OAuthServerProvider {
     }
   >();
   private gStates = new Map<string, { txn: string; exp: number }>();
+  // The reply to the FIRST use of a refresh token, kept in memory for the grace window so a retry gets the very same tokens (no second chain).
+  private rotated = new Map<string, { tokens: OAuthTokens; exp: number }>();
   private codes = new Map<
     string,
     { client: OAuthClientInformationFull; params: AuthorizationParams; sub: string; email: string; exp: number }
@@ -359,10 +362,22 @@ export class FleetOAuth implements OAuthServerProvider {
         throw new InvalidGrantError("refresh token reused");
       }
       this.cfg.audit("refresh-retry-in-grace", { client: client.client_id });
-      return this.issue(rec.grant); // the grace runs from the FIRST use: `used` is not renewed here
+      const again = this.rotated.get(key);
+      if (again && again.exp > Date.now()) return again.tokens; // same reply as the first call: retries never multiply live chains
+      // After a restart the first reply is gone: allow exactly ONE more rotation, then it is a replay.
+      if (rec.retried) {
+        this.revokeGrant(rec.grant);
+        this.cfg.audit("refresh-reuse-revoked", { denied: true, client: client.client_id });
+        throw new InvalidGrantError("refresh token reused");
+      }
+      rec.retried = true;
+      return this.issue(rec.grant);
     }
     rec.used = now();
-    return this.issue(rec.grant);
+    const tokens = this.issue(rec.grant);
+    for (const [k, v] of this.rotated) if (v.exp < Date.now()) this.rotated.delete(k);
+    this.rotated.set(key, { tokens, exp: Date.now() + REFRESH_GRACE_S * 1000 });
+    return tokens;
   }
 
   private issue(grant: string): OAuthTokens {
