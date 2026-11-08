@@ -85,13 +85,26 @@ SELECT i.id, i.agent_id, i.reply_channel, i.prompt, i.requeues, i.owner_alarmed_
    AND NOT EXISTS (
         SELECT 1 FROM outbound_queue o
          WHERE o.agent_id = i.agent_id
-           AND o.created_at >= i.delivered_at )
+           AND o.created_at >= CASE WHEN i.agent_id IN (SELECT value FROM json_each(?)) THEN i.created_at ELSE i.delivered_at END )
  ORDER BY i.id ASC
 """
 
 
+def codex_agents(agents_dir="/opt/claude/theoffice/tenant/agents"):
+    # A codex agent's delivered_at is stamped when its exec FINISHES (turn.completed), after its own office-say: for these the reply
+    # window starts at the message's created_at (pete / inbound 37578, 2026-11-08).
+    out = []
+    try:
+        for n in os.listdir(agents_dir):
+            try:
+                if (json.load(open(f"{agents_dir}/{n}/agent.json")).get("runtime") or "claude") == "codex": out.append(n)
+            except Exception: continue
+    except Exception: pass
+    return out
+
+
 def find_gap_rows(conn):
-    return conn.execute(GAP_SQL, (ALERT_SEC, MAX_AGE_SEC)).fetchall()
+    return conn.execute(GAP_SQL, (ALERT_SEC, MAX_AGE_SEC, json.dumps(codex_agents()))).fetchall()
 
 
 def _pane(agent):
