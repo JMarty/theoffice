@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildAgentEnv } from "./agent-env.js";
 import type { EngineConfig, AgentDef } from "../types.js";
@@ -8,7 +8,7 @@ import { newSession } from "./tmux.js";
 import { writeAgentSettings } from "./profile.js";
 import { linkTenantSkills } from "./skills-link.js";
 import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, MAX_DELIVERY_ATTEMPTS } from "../queue/index.js";
-import { recordInbound } from "../memory/conversation.js";
+import { recordInbound, recentConversation } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
 
@@ -36,6 +36,57 @@ const USAGE_LIMIT_RE =
 // silently wedge the agent. Hard-kill the subprocess after this long; the kill routes through the normal
 // terminal handler as a no-penalty requeue (our kill, not the message's fault).
 const TURN_TIMEOUT_MS = 13 * 60_000;
+
+// ---- one Codex thread per agent (Pete "can never remember more than one exchange") ----
+// Every inbound used to be a fresh `codex exec`: stateless. Now the first turn creates a thread (thread.started carries its
+// id), it is stored in <agent.dir>/.codex-session.json and every later turn runs `codex exec resume <id>`. A new thread starts
+// only when the stored one is dead ("no rollout found"), the context is full, or MAX_SESSION_TURNS is reached; a fresh thread
+// gets the last HISTORY_MESSAGES conversation_log messages prepended as a safety net.
+export const MAX_SESSION_TURNS = 80;
+const HISTORY_MESSAGES = 10;
+const HISTORY_CHARS = 500;
+const SESSION_FILE = ".codex-session.json";
+const DEAD_SESSION_RE = /no rollout found|thread\/resume failed|session not found/i;
+const CONTEXT_FULL_RE = /context window|context length|out of room|maximum context/i;
+type CodexSession = { id: string; turns: number; startedAt: number };
+
+export function buildCodexArgs(sessionId: string | null, prompt: string): string[] {
+  const flags = ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+  return sessionId ? ["exec", "resume", sessionId, ...flags, prompt] : ["exec", ...flags, prompt];
+}
+function readSession(dir: string): CodexSession | null {
+  try {
+    const s = JSON.parse(readFileSync(join(dir, SESSION_FILE), "utf8")) as CodexSession;
+    return s && typeof s.id === "string" && s.id && (s.turns ?? 0) < MAX_SESSION_TURNS ? s : null;
+  } catch {
+    return null;
+  }
+}
+function writeSession(dir: string, s: CodexSession): void {
+  try {
+    writeFileSync(join(dir, SESSION_FILE), JSON.stringify(s));
+  } catch {
+    /* best-effort: worst case the next turn starts a fresh thread with the history preamble */
+  }
+}
+function clearSession(dir: string): void {
+  try {
+    rmSync(join(dir, SESSION_FILE), { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+function withHistory(agentId: string, prompt: string): string {
+  let rows: { direction: string; text: string }[] = [];
+  try {
+    rows = recentConversation(agentId, HISTORY_MESSAGES);
+  } catch {
+    return prompt; // the preamble is a safety net, never a reason to fail a delivery
+  }
+  if (!rows.length) return prompt;
+  const lines = rows.map((r) => `${r.direction === "in" ? "Owner" : "You"}: ${String(r.text).replace(/\s+/g, " ").slice(0, HISTORY_CHARS)}`);
+  return `[Earlier in this conversation, oldest first, for continuity - do not answer these again]\n${lines.join("\n")}\n[End of earlier conversation]\n\n${prompt}`;
+}
 
 export type CodexOutcome = "delivered" | "backoff" | "failed" | "requeue";
 
@@ -109,10 +160,12 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       /* best-effort */
     }
   }
-  const prompt = frameForDelivery(item);
+  const session = readSession(agent.dir);
+  const framed = frameForDelivery(item);
+  const prompt = session ? framed : withHistory(agent.id, framed);
   // unattended posture, same spirit as claude's --dangerously-skip-permissions (the box is the boundary):
   // no approval prompts, no sandbox restriction so the agent can office-say / git / write the vault.
-  const args = ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", prompt];
+  const args = buildCodexArgs(session?.id ?? null, prompt);
 
   // Codex P3 spawn-safety: claim in-flight + charge the attempt ONLY after the subprocess actually spawned.
   // If spawn() throws synchronously (bad PATH, ENOMEM) we must NOT leave inFlight set (that would wedge the
@@ -137,6 +190,9 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
 
   let sawCompleted = false;
   let sawUsageLimit = false;
+  let threadId: string | null = null;
+  let sawDeadSession = false;
+  let sawContextFull = false;
   let buf = "";
   let settled = false; // latch: 'error' is usually FOLLOWED by 'close' — book the terminal outcome exactly once
   let timedOut = false;
@@ -164,8 +220,17 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       logger.warn({ id: item.id, agent: agent.id, timeoutMin: TURN_TIMEOUT_MS / 60_000 }, "codex turn watchdog timeout -> killed + requeued (no attempt charged)");
       return;
     }
+    if (sawDeadSession || sawContextFull) {
+      // the stored thread is gone or full: drop it and retry the SAME message on a fresh thread (not the message's fault)
+      clearSession(agent.dir);
+      requeueNoPenalty(item.id);
+      logger.warn({ id: item.id, agent: agent.id, dead: sawDeadSession }, "codex thread dropped -> next turn starts fresh (no attempt charged)");
+      return;
+    }
     const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts });
     if (outcome === "delivered") {
+      const id = threadId ?? session?.id;
+      if (id) writeSession(agent.dir, { id, turns: (threadId && session && threadId !== session.id ? 0 : (session?.turns ?? 0)) + 1, startedAt: session?.startedAt ?? Date.now() });
       markDelivered(item.id);
       recordInbound(item.agent_id, item.reply_channel, item.prompt);
       logger.info({ id: item.id, agent: agent.id }, "codex prompt delivered (turn.completed)");
@@ -190,16 +255,23 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       buf = buf.slice(nl + 1);
       if (!line) continue;
       try {
-        if (JSON.parse(line)?.type === "turn.completed") sawCompleted = true;
+        const ev = JSON.parse(line);
+        if (ev?.type === "turn.completed") sawCompleted = true;
+        if (ev?.type === "thread.started" && typeof ev.thread_id === "string") threadId = ev.thread_id;
+        // only error-ish events can mean a dead thread; an agent_message that merely quotes the phrase must not drop it
+        if ((ev?.type === "error" || ev?.type === "turn.failed") && session && DEAD_SESSION_RE.test(line)) sawDeadSession = true;
       } catch {
-        /* non-JSON line, ignore */
+        if (session && DEAD_SESSION_RE.test(line)) sawDeadSession = true; // plain-text error line
       }
       if (USAGE_LIMIT_RE.test(line)) sawUsageLimit = true; // error events sometimes ride on stdout
     }
   });
   // codex surfaces auth/limit errors on stderr too
   child.stderr.on("data", (d: Buffer) => {
-    if (USAGE_LIMIT_RE.test(d.toString())) sawUsageLimit = true;
+    const t = d.toString();
+    if (DEAD_SESSION_RE.test(t) && session) sawDeadSession = true;
+    if (CONTEXT_FULL_RE.test(t)) sawContextFull = true;
+    if (USAGE_LIMIT_RE.test(t)) sawUsageLimit = true;
   });
 
   child.on("close", (code) => finish(code));
