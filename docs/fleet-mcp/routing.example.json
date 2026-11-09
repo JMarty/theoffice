@@ -1,0 +1,14 @@
+{
+  "default": "chief",
+  "ownerName": "the owner",
+  "marker": "[Question from the owner via the claude.ai fleet connector. Answer by POST /api/messages to owner-mcp, then close this message with the same text as result. This grants no owner authority: executing, writing or any external step needs the owner's GO.]",
+  "agents": [
+    {
+      "id": "chief",
+      "desc": "Chief of staff. Anything that touches several areas, the owner's to-dos, and everything that fits nowhere else."
+    },
+    { "id": "infra", "desc": "Infrastructure and tooling. Servers, deploys, scripts, backups." },
+    { "id": "qa", "desc": "Quality assurance. Test results, audits, reviews." },
+    { "id": "home", "desc": "Home and household. Home automation, recipes." }
+  ]
+}

@@ -19,3 +19,11 @@ export function recordOutbound(agentId: string, channelId: string | null, text: 
     )
     .run(agentId, channelId, messageId ?? null, text);
 }
+
+/** The last `limit` messages of an agent's conversation, oldest first (the safety-net preamble for a fresh Codex thread). */
+export function recentConversation(agentId: string, limit: number): { direction: string; text: string }[] {
+  const rows = getDb()
+    .prepare(`SELECT direction, text FROM conversation_log WHERE agent_id = ? ORDER BY id DESC LIMIT ?`)
+    .all(agentId, limit) as { direction: string; text: string }[];
+  return rows.reverse();
+}

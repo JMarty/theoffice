@@ -1,0 +1,13 @@
+[Unit]
+Description=Fleet MCP (remote MCP server for claude.ai), loopback only
+After=network-online.target
+
+[Service]
+WorkingDirectory=/path/to/theoffice
+EnvironmentFile=%h/.config/fleet-mcp/env
+ExecStart=/usr/bin/node dist/mcp/server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

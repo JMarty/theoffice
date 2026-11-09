@@ -144,6 +144,12 @@ if [ "$_SEED" != "none" ] && [ -d "$INSTALL_DIR/templates/skills" ]; then
   fi
 fi
 
+# Skill router: UserPromptSubmit hook that tells an agent which skill to load first (merged into ~/.claude/settings.json, idempotent,
+# every other hook is kept). Routes beyond the generic ones go in $TENANT_ROOT/config/skill-routes.json. OFFICE_SKILL_ROUTER=0 skips it.
+if [ "${OFFICE_SKILL_ROUTER:-1}" != "0" ] && [ -f "$INSTALL_DIR/tools/skill-router/install_hook.py" ]; then
+  python3 "$INSTALL_DIR/tools/skill-router/install_hook.py" --root "$INSTALL_DIR" 2>&1 | sed 's/^/  /' || true
+fi
+
 # ---- 3b. dashboard bind: localhost vs LAN -----------------------------------
 # Default 127.0.0.1 (safe — only this machine / SSH tunnel). LAN (0.0.0.0) lets
 # any device on the home network reach it (phone, laptop). Choose via prompt when

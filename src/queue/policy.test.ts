@@ -6,7 +6,8 @@ import {
   isStaleDroppableHeartbeat,
   ownerDropAlarmText,
   ownerStallAlarmText,
-  permissionPromptAlarmText,
+  permissionPromptBusText,
+  permissionPromptDecider,
 } from "./policy.js";
 
 describe("shouldEscalateDroppedOwnerItem", () => {
@@ -79,12 +80,19 @@ describe("ownerStallAlarmText — the queued-but-stuck case, worded honestly", (
   });
 });
 
-describe("permissionPromptAlarmText — never dismissed, always surfaced", () => {
-  it("names the agent, says it was left untouched, and gives the attach command", () => {
-    const txt = permissionPromptAlarmText("cfo", "theoffice", "agent-cfo");
-    expect(txt).toContain("*cfo*");
-    expect(txt).toMatch(/did NOT touch|left|frozen/i);
-    expect(txt).toContain("tmux -L theoffice attach -t agent-cfo");
-    expect(txt).toMatch(/approve|reject/i);
+describe("permission prompt routing (owner rule 2026-11-02: decided by marveen or darryl, never the owner)", () => {
+  it("goes to marveen, or to darryl when the frozen agent IS marveen", () => {
+    expect(permissionPromptDecider("cfo")).toBe("marveen");
+    expect(permissionPromptDecider("darryl")).toBe("marveen");
+    expect(permissionPromptDecider("marveen")).toBe("darryl");
+  });
+  it("names the agent, says it was left untouched, gives the read command and the prompt, and drops long opaque strings", () => {
+    const txt = permissionPromptBusText("cfo", "theoffice", "agent-cfo", "Do you want to proceed?\nexport TOKEN=abcdefghijklmnopqrstuvwxyz0123456789ABCDEF");
+    expect(txt).toContain("PERMISSION PROMPT: cfo");
+    expect(txt).toMatch(/did NOT touch/i);
+    expect(txt).toContain("tmux -L theoffice capture-pane");
+    expect(txt).toContain("Do you want to proceed?");
+    expect(txt).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789ABCDEF");
+    expect(txt).toContain("[long string removed]");
   });
 });

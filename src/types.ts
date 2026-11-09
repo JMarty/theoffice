@@ -147,7 +147,7 @@ export interface WebConfig {
    * carrying a Cf-Access-Jwt-Assertion that verifies against the team keys for one of `audiences` and the owner's email (src/web/cf-access.ts).
    * Unset = no dashboard unfreeze at all (Slack / deleting the file still work).
    */
-  cfAccess?: { teamDomain: string; audiences: string[]; ownerEmail: string };
+  cfAccess?: { teamDomain: string; audiences: string[]; ownerEmail: string; tokenHosts?: string[] };      // tokenHosts: public hostnames (behind Access) where the owner's Access JWT also yields the dashboard token for Mission Control; empty/absent = off
   /**
    * Which dashboard `/` opens: "classic" (default) or "mc" (Mission Control, served under /mc/).
    * With "mc", `/` redirects to /mc/ and Mission Control hides its "Classic" switch link.
