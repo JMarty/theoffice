@@ -79,6 +79,10 @@ describe("runtime registry", () => {
     for (const m of models) expect(m).toMatch(/^[a-z0-9.-]+$/);
     // the live list comes from `agy models`; the built-in fallback must at least hold the current flash tiers
     expect(models).toContain("gemini-3.8-flash-high");
+    expect(models).toContain("gemini-4-argon-high");
+    // agy retired these; the fallback must not offer a slug that exits 1
+    expect(models).not.toContain("claude-sonnet-4-6");
+    expect(models).not.toContain("claude-opus-4-6-thinking");
   });
 
   it("advertises each provider's own effort levels", () => {

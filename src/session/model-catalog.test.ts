@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createModelCatalog, parseAgyModels, parseCodexModels } from "./model-catalog.js";
+import { cliEnv, createModelCatalog, parseAgyModels, parseCodexModels } from "./model-catalog.js";
 
 describe("parsers", () => {
   it("agy models: slugs from the tab-separated lines, banner ignored", () => {
@@ -50,5 +50,15 @@ describe("createModelCatalog", () => {
     expect(await c.warm()).toEqual(["v1"]);
     t += 100;
     expect(await c.warm()).toEqual(["v2"]);
+  });
+});
+
+describe("cliEnv", () => {
+  it("puts the owner's ~/.local/bin first, where agy and codex live (the systemd unit's PATH lacks it)", () => {
+    const env = cliEnv({ HOME: "/home/o", PATH: "/usr/bin:/bin" });
+    expect(env.PATH).toBe("/home/o/.local/bin:/usr/bin:/bin");
+  });
+  it("falls back to the standard dirs when PATH is unset", () => {
+    expect(cliEnv({ HOME: "/home/o" }).PATH).toBe("/home/o/.local/bin:/usr/local/bin:/usr/bin:/bin");
   });
 });

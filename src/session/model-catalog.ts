@@ -74,8 +74,17 @@ export function parseCodexModels(out: string): string[] {
   return ms.filter((m) => m?.visibility === "list" && typeof m.slug === "string").map((m) => m.slug as string);
 }
 
+/**
+ * The engine's env with the owner's ~/.local/bin in front, same as buildAgentEnv: agy and codex live
+ * there, and the systemd unit's PATH does not have it (every refresh died with "spawn agy ENOENT" and
+ * the dashboard kept serving the stale built-in list).
+ */
+export function cliEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, PATH: `${base.HOME ?? ""}/.local/bin:${base.PATH ?? "/usr/local/bin:/usr/bin:/bin"}` };
+}
+
 export function runCli(cmd: string, args: string[], timeoutMs = 30_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 8_000_000, env: process.env }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 8_000_000, env: cliEnv() }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
 }

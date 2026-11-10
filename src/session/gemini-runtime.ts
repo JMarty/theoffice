@@ -252,12 +252,20 @@ export function bookTurn(agentId: string, stdout: string): void {
   if (cid) saveSession(agentId, "gemini", cid, ctx?.tokens ?? 0, ctx?.window ?? 0);
 }
 
+// `agy models` as of 2026-11-10 (agy 1.5.4); only used until the first live refresh lands.
 const GEMINI_FALLBACK_MODELS = [
+  "gemini-4-argon-high",
+  "gemini-4-argon-medium",
+  "gemini-4-argon-low",
   "gemini-3.8-flash-high",
   "gemini-3.8-flash-medium",
   "gemini-3.8-flash-low",
-  "claude-sonnet-4-6",
-  "claude-opus-4-6-thinking",
+  "claude-opus-5-5-high",
+  "claude-opus-5-5-medium",
+  "claude-opus-5-5-low",
+  "claude-sonnet-5-5-high",
+  "claude-sonnet-5-5-medium",
+  "claude-sonnet-5-5-low",
   "gpt-oss-120b-medium",
 ];
 const geminiCatalog = createModelCatalog({
