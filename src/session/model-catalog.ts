@@ -18,7 +18,7 @@ export function createModelCatalog(opts: {
   retryMs?: number;
   now?: () => number;
 }) {
-  const ttl = opts.ttlMs ?? 60 * 60_000;
+  const ttl = opts.ttlMs ?? 24 * 60 * 60_000; // once a day is plenty: the providers rename models every few weeks, not hourly
   const retry = opts.retryMs ?? 5 * 60_000;
   const now = opts.now ?? Date.now;
   let list: readonly string[] = opts.fallback;
