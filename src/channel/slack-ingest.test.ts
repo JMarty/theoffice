@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseInbound, prepareInboundDelivery, parsePortalSignal } from "./slack-ingest.js";
+import { parseInbound, prepareInboundDelivery, parsePortalSignal, describeSlackLocation } from "./slack-ingest.js";
 import { isAllowedSender } from "./access.js";
 
 describe("prepareInboundDelivery (non-owner sender identity + routing safety)", () => {
@@ -42,7 +42,7 @@ describe("parseInbound", () => {
   const dm = { type: "message", channel_type: "im", channel: "D123", user: "U_owner", text: "hey Charly", ts: "1.1" };
 
   it("accepts a real DM", () => {
-    expect(parseInbound(dm, "U_charly")).toEqual({ text: "hey Charly", channel: "D123", user: "U_owner", ts: "1.1", files: [] });
+    expect(parseInbound(dm, "U_charly")).toEqual({ text: "hey Charly", channel: "D123", user: "U_owner", ts: "1.1", channelType: "im", files: [] });
   });
 
   it("accepts a file upload (subtype file_share) with a caption", () => {
@@ -57,6 +57,7 @@ describe("parseInbound", () => {
       channel: "D123",
       user: "U_owner",
       ts: "1.1",
+      channelType: "im",
       files: [{ id: "F1", name: "photo.png", mimetype: "image/png", urlPrivateDownload: "https://files.slack.com/F1/photo.png" }],
     });
   });
@@ -255,5 +256,27 @@ describe("app_mention auth gate (new channel surface can't bypass isAllowedSende
 
   it("parseInbound surfaces the MENTIONER as the sender, so the gate checks the real person (not the bot)", () => {
     expect(parseInbound(mention("U_random"), BOT)?.user).toBe("U_random");
+  });
+});
+
+describe("describeSlackLocation", () => {
+  it("names a DM by channel_type", () => {
+    expect(describeSlackLocation({ channel: "D123", channelType: "im" })).toBe("[Slack DM: channel D123]");
+  });
+
+  it("falls back to the id prefix when channel_type is absent (app_mention)", () => {
+    expect(describeSlackLocation({ channel: "C9" })).toBe("[Slack channel: channel C9]");
+    expect(describeSlackLocation({ channel: "G7" })).toBe("[Slack private channel or group DM: channel G7]");
+  });
+
+  it("marks a thread reply with its parent ts", () => {
+    const p = parseInbound({ type: "message", channel_type: "im", channel: "D1", user: "U1", text: "x", ts: "2.2", thread_ts: "1.1" });
+    expect(p?.threadTs).toBe("1.1");
+    expect(describeSlackLocation(p!)).toBe("[Slack DM: channel D1, thread reply (thread_ts 1.1)]");
+  });
+
+  it("a thread's parent message itself (thread_ts === ts) is not a thread reply", () => {
+    const p = parseInbound({ type: "message", channel_type: "im", channel: "D1", user: "U1", text: "x", ts: "1.1", thread_ts: "1.1" });
+    expect(p?.threadTs).toBeUndefined();
   });
 });
