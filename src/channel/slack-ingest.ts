@@ -23,6 +23,10 @@ export interface ParsedInbound {
   channel: string;
   user: string;
   ts: string;
+  /** Slack's channel_type ("im", "channel", "group", "mpim"); absent on some events (app_mention). */
+  channelType?: string;
+  /** Parent ts when the message is a reply inside a thread; absent for a top-level message. */
+  threadTs?: string;
   files: SlackFile[];
 }
 
@@ -158,7 +162,22 @@ export function parseInbound(event: unknown, selfBotUserId?: string): ParsedInbo
   const files = parseFiles(e.files);
   if (!text && files.length === 0) return null;
   if (typeof e.channel !== "string" || typeof e.user !== "string" || typeof e.ts !== "string") return null;
-  return { text, channel: e.channel, user: e.user, ts: e.ts, files };
+  const channelType = typeof e.channel_type === "string" ? e.channel_type : undefined;
+  const threadTs = typeof e.thread_ts === "string" && e.thread_ts !== e.ts ? e.thread_ts : undefined;
+  return { text, channel: e.channel, user: e.user, ts: e.ts, channelType, threadTs, files };
+}
+
+/**
+ * One header line telling the agent WHERE the message was written: channel id, its kind (DM / channel /
+ * private channel / group DM) and, for a thread reply, the parent ts. Slack's channel_type wins; without it
+ * the id prefix decides (D = DM, C = channel, G = private channel or group DM).
+ */
+export function describeSlackLocation(p: Pick<ParsedInbound, "channel" | "channelType" | "threadTs">): string {
+  const byType: Record<string, string> = { im: "DM", channel: "channel", group: "private channel", mpim: "group DM" };
+  const byPrefix: Record<string, string> = { D: "DM", C: "channel", G: "private channel or group DM" };
+  const kind = (p.channelType && byType[p.channelType]) || byPrefix[p.channel.charAt(0)] || "unknown";
+  const thread = p.threadTs ? `, thread reply (thread_ts ${p.threadTs})` : "";
+  return `[Slack ${kind}: channel ${p.channel}${thread}]`;
 }
 
 /**
@@ -372,7 +391,7 @@ export function startSlackIngest(cfg: EngineConfig): () => void {
       const id = enqueueInbound({
         agentId: agent.id,
         source: "channel",
-        prompt,
+        prompt: `${describeSlackLocation(parsed)}\n${prompt}`,
         replyChannel: parsed.channel,
         replyUser,
         dedupKey: `slack:${parsed.ts}`,
