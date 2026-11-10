@@ -16,6 +16,9 @@ import {
   estimatedContextPct,
   CONTEXT_WINDOW,
   UNKNOWN_CONTEXT_MAX_TURNS,
+  DEFAULT_MAX_TURNS,
+  rolloverLimits,
+  alertConfigFailure,
 } from "./exec-sessions.js";
 import { runMigrations } from "../db/migrate.js";
 import { SCHEMA_SQL } from "../db/schema.js";
@@ -102,6 +105,29 @@ describe("usage + sessions in the db (migration v10)", () => {
     expect(sessionToResume("a", "gemini")).toBeNull();
   });
 
+  it("a measured but small context still rolls over at the hard turn cap (every resumed turn re-sends it all)", () => {
+    for (let i = 0; i < DEFAULT_MAX_TURNS - 1; i++) saveSession("a", "codex", "t1", 10_000);
+    expect(sessionToResume("a", "codex")).toBe("t1");
+    saveSession("a", "codex", "t1", 10_000);
+    expect(sessionToResume("a", "codex")).toBeNull();
+  });
+
+  it("the turn cap and the window share come from config", () => {
+    const limits = rolloverLimits({ maxTurns: 3, rolloverFraction: 0.4 });
+    for (let i = 0; i < 2; i++) saveSession("a", "codex", "t1", 10_000);
+    expect(sessionToResume("a", "codex", limits)).toBe("t1");
+    saveSession("a", "codex", "t1", 10_000);
+    expect(sessionToResume("a", "codex", limits)).toBeNull();
+    saveSession("b", "codex", "t2", Math.floor(CONTEXT_WINDOW.codex! * 0.45));
+    expect(sessionToResume("b", "codex")).toBe("t2"); // under the default 0.7
+    expect(sessionToResume("b", "codex", limits)).toBeNull(); // over the configured 0.4
+  });
+
+  it("nonsense config values fall back to the defaults", () => {
+    expect(rolloverLimits({ maxTurns: 0, rolloverFraction: 3 })).toEqual(rolloverLimits(undefined));
+    expect(rolloverLimits({ maxTurns: -5, rolloverFraction: 0 })).toEqual(rolloverLimits({}));
+  });
+
   it("a big SUMMED turn usage no longer forces a roll-over: only the measured context counts", () => {
     // regression: heat reported 3.5M summed input for a ~120k context and rolled over after every tool turn
     saveSession("h", "gemini", "c1", 122_787, 256_000);
@@ -119,5 +145,18 @@ describe("gemini bookTurn", () => {
   it("unparsable stdout books nothing and does not throw", () => {
     bookTurn("g", "plain text answer");
     expect(getSession("g", "gemini")).toBeNull();
+  });
+});
+
+describe("config-error alert text", () => {
+  it("keeps only the first line, elides long quoted values (an echoed prompt) and caps the length", () => {
+    const prompt = "my private message ".repeat(20);
+    alertConfigFailure("zeus", "cap-1", "codex", 7, `error: unexpected argument '${prompt}' found\n\nUsage: codex exec [OPTIONS] '${prompt}'`);
+    const row = db.prepare("SELECT content FROM agent_messages WHERE to_agent = 'zeus'").get() as { content: string };
+    expect(row.content).toContain("unexpected argument");
+    expect(row.content).not.toContain("my private message");
+    expect(row.content).not.toContain("Usage:");
+    const detail = row.content.split("Detail: ")[1]!.split(". Check")[0]!;
+    expect(detail.length).toBeLessThanOrEqual(160);
   });
 });

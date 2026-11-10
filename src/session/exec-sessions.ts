@@ -23,6 +23,25 @@ export const CONTEXT_WINDOW: Record<string, number> = {
 export const UNKNOWN_CONTEXT_MAX_TURNS = 20;
 /** Start a fresh conversation once the last turn's context fill passes this share of the window. */
 export const ROLLOVER_FRACTION = 0.7;
+/**
+ * Hard cap on resumed turns even when the context is measured and small: every resumed turn re-sends the
+ * whole conversation, so a long-lived thread gets more expensive per turn long before it fills the window.
+ */
+export const DEFAULT_MAX_TURNS = 60;
+
+export interface RolloverLimits {
+  maxTurns: number;
+  fraction: number;
+}
+/** The tenant's `execSessions` config with sane fallbacks (a non-positive cap or a share outside (0,1] is ignored). */
+export function rolloverLimits(c: { maxTurns?: number; rolloverFraction?: number } | undefined): RolloverLimits {
+  const t = c?.maxTurns;
+  const f = c?.rolloverFraction;
+  return {
+    maxTurns: typeof t === "number" && Number.isFinite(t) && t >= 1 ? Math.floor(t) : DEFAULT_MAX_TURNS,
+    fraction: typeof f === "number" && f > 0 && f <= 1 ? f : ROLLOVER_FRACTION,
+  };
+}
 
 export interface TurnUsage {
   input: number;
@@ -115,19 +134,25 @@ export function clearSession(agentId: string): boolean {
 
 /**
  * Which conversation to resume for this turn: the stored id, unless it belongs to another runtime
- * (the agent was flipped) or the context already passed the roll-over share of the window.
+ * (the agent was flipped), the context already passed the roll-over share of the window, or the
+ * conversation hit the turn cap, whichever comes first.
  */
-export function sessionToResume(agentId: string, runtime: string): string | null {
+export function sessionToResume(agentId: string, runtime: string, limits: RolloverLimits = rolloverLimits(undefined)): string | null {
   const s = getSession(agentId, runtime);
   if (!s) return null;
   const win = s.contextWindow || CONTEXT_WINDOW[runtime];
-  if (s.lastContextTokens > 0 && win && s.lastContextTokens > win * ROLLOVER_FRACTION) {
+  if (s.lastContextTokens > 0 && win && s.lastContextTokens > win * limits.fraction) {
     logger.info({ agent: agentId, runtime, ctx: s.lastContextTokens, win }, "context past roll-over -> starting a new conversation");
     clearSession(agentId);
     return null;
   }
   if (s.lastContextTokens <= 0 && s.turns >= UNKNOWN_CONTEXT_MAX_TURNS) {
     logger.info({ agent: agentId, runtime, turns: s.turns }, "context size unknown and many turns -> starting a new conversation");
+    clearSession(agentId);
+    return null;
+  }
+  if (s.turns >= limits.maxTurns) {
+    logger.info({ agent: agentId, runtime, turns: s.turns }, "turn cap reached -> starting a new conversation");
     clearSession(agentId);
     return null;
   }
@@ -148,6 +173,15 @@ export function estimatedContextPct(agentId: string, runtime: string): number | 
  * throttled to one alert per agent per 30 minutes so a backlog of queued prompts does not flood the bus.
  */
 const CONFIG_ALERT_GAP_MS = 30 * 60_000;
+/**
+ * The CLI error as it goes on the bus: first line only, quoted values longer than 40 chars elided, at most
+ * 160 chars. A CLI that echoes its argv ("unexpected argument '<prompt>'") would otherwise copy prompt text.
+ */
+function alertDetail(detail: string): string {
+  const line = (detail.split("\n").find((l) => l.trim()) ?? "").trim();
+  const elided = line.replace(/(["'`])[^"'`]{40,}\1/g, "$1…$1");
+  return elided.length > 160 ? elided.slice(0, 159) + "…" : elided;
+}
 const lastConfigAlert = new Map<string, number>();
 export function alertConfigFailure(mainAgentId: string, agentId: string, runtime: string, itemId: number, detail: string): void {
   const nowMs = Date.now();
@@ -162,7 +196,7 @@ export function alertConfigFailure(mainAgentId: string, agentId: string, runtime
       "engine",
       mainAgentId,
       `${runtime} agent "${agentId}" has a configuration error: queue item #${itemId} was failed WITHOUT retries (retrying cannot fix it). ` +
-        `Detail: ${detail.slice(0, 300)}. Check the agent's model/effort in agent.json against the runtime's model list (GET /api/runtimes).`,
+        `Detail: ${alertDetail(detail)}. Check the agent's model/effort in agent.json against the runtime's model list (GET /api/runtimes).`,
     );
   } catch (err) {
     logger.warn({ agent: agentId, err: String((err as Error).message ?? err) }, "config-error alert not sent");
