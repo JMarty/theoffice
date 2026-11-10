@@ -14,6 +14,8 @@ APP = os.environ.get("BACKUP_APP_DATA", "")      # optional: an app data dir (db
 APP_DB = os.environ.get("BACKUP_APP_DB", "app.db")      # sqlite file inside the app data dir
 D1_DB = os.environ.get("BACKUP_D1_DATABASE", "")  # optional: Cloudflare D1 database name to export; unset = skipped
 D1_CONFIG = os.environ.get("BACKUP_D1_CONFIG", f"{HERE}/wrangler-prod.toml")
+D1_TOKEN_FILE = os.environ.get("BACKUP_D1_TOKEN_FILE", "")      # optional: file with the Cloudflare token for THIS export (else the ambient CLOUDFLARE_API_TOKEN); never on a command line
+D1_ACCOUNT_ID = os.environ.get("BACKUP_D1_ACCOUNT_ID", "")      # optional: Cloudflare account id of the database (else the ambient one)
 problems = []
 def say(m): print(time.strftime("%H:%M:%S"), m, flush=True)
 def bus(text):
@@ -81,6 +83,24 @@ def prune(files):
 # ---------- staging ----------
 def sqlite_copy(src, dst):
     s = sqlite3.connect(f"file:{src}?mode=ro", uri=True); d = sqlite3.connect(dst); s.backup(d); d.close(); s.close()
+def _extras():
+    """tenant-specific backup extras from tenant/config/backup-extras.json (tenant data, not engine code):
+    {"private_block": {"dir": "store/x", "db": "x.db"}, "board_folder": "<folder name under agents/*/work>", "mirrors": ["<re-fetchable raw/ mirror names under the board folder>"]}; absent = none of it is staged"""
+    try: return json.load(open(f"{ROOT}/config/backup-extras.json"))
+    except Exception: return {}
+def _mirrors(): return tuple(_extras().get("mirrors", []))
+def bundle_repo(repo, outdir, name):
+    """a work repo with NO remote exists nowhere else (e.g. the board with its cost data, never pushed): save the full history as a git bundle plus its uncommitted/untracked text files (<= 1 MB, ignored files left out)"""
+    try:
+        if subprocess.run(["git", "-C", repo, "remote"], capture_output=True, text=True, check=True).stdout.strip(): return
+        os.makedirs(outdir, exist_ok=True)
+        subprocess.run(["git", "-C", repo, "bundle", "create", f"{outdir}/{name}.bundle", "--all"], capture_output=True, check=True)
+        out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--modified", "--others", "--exclude-standard"], capture_output=True, check=True).stdout.decode().split("\0")
+        for rel in filter(None, out):
+            p = os.path.join(repo, rel)
+            if rel.lower().endswith((".md", ".py", ".html", ".csv", ".txt", ".json", ".sh")) and os.path.isfile(p) and os.path.getsize(p) < 1_000_000:
+                dst = f"{outdir}/{name}.wip/{rel}"; os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.copy2(p, dst)
+    except Exception as e: problems.append(f"git bundle {name}: {type(e).__name__}")
 def stage(work):
     S = os.path.join(work, "office-backup"); os.makedirs(S)
     # 1 office store DBs (live sqlite: online backup, never a raw file copy)
@@ -90,6 +110,43 @@ def stage(work):
         except Exception as e: problems.append(f"sqlite {os.path.basename(p)}: {type(e).__name__}")
     for p in glob.glob(f"{ROOT}/store/*.json") + glob.glob(f"{ROOT}/store/.dashboard-token"):
         if os.path.getsize(p) < 2_000_000: shutil.copy2(p, f"{S}/store/")
+    # 1b private data block (config private_block): db via online backup, attachments, voice notes while the whole folder stays under 300 MB (over it: a problem is raised, the db with the transcripts is still saved)
+    try:
+        PB = _extras().get("private_block") or {}
+        ED = f"{ROOT}/{PB['dir']}" if PB.get("dir") else ""
+        if ED and os.path.isdir(ED):
+            os.makedirs(f"{S}/{PB['dir']}", exist_ok=True)
+            try: sqlite_copy(f"{ED}/{PB['db']}", f"{S}/{PB['dir']}/{PB['db']}")
+            except Exception as e: problems.append(f"sqlite {PB.get('db')}: {type(e).__name__}")
+            size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(ED) for f in fs)
+            if size < 300_000_000:
+                for sub in ("files", "audio", "tx"):
+                    if os.path.isdir(f"{ED}/{sub}"): shutil.copytree(f"{ED}/{sub}", f"{S}/{PB['dir']}/{sub}", dirs_exist_ok=True, symlinks=True)
+            else: problems.append(f"{PB['dir']} {size // 1_000_000} MB over the 300 MB backup cap: files+audio not saved, db is")
+    except Exception as e: problems.append(f"private block: {type(e).__name__}")
+    # 1c work folders (specs, plans, small scripts live nowhere else): text files <= 1 MB of agents/*/work, no binaries / dependency dirs / copies (src-ref) / git repos (those are pushed);
+    # the board data folder (config board_folder) in full (cap 200 MB without the 3 raw/ mirrors: over it a problem is raised, the text files are still saved)
+    try:
+        TEXT = (".md", ".py", ".html", ".csv", ".txt", ".json", ".sh"); BOARD = _extras().get("board_folder") or "\0"; MIRRORS = _mirrors(); SKIPD = {"node_modules", ".venv", "__pycache__", "dist", "src-ref", ".wrangler", ".git", BOARD}
+        for ag in sorted(glob.glob(f"{ROOT}/agents/*/work")):
+            who = os.path.basename(os.path.dirname(ag))
+            for dp, dn, fn in os.walk(ag):
+                for d in list(dn):
+                    if d == BOARD:
+                        full = os.path.join(dp, d); mirrors = {os.path.join(full, "raw", x, "files") for x in MIRRORS}   # the files/ of each are re-fetchable from source (2.5 GB): left out; their index/cards/reports (derived work) stay
+                        size = 0
+                        for r, dd, fs in os.walk(full):
+                            dd[:] = [x for x in dd if os.path.join(r, x) not in mirrors]; size += sum(os.path.getsize(os.path.join(r, f)) for f in fs)
+                        if size < 200_000_000: shutil.copytree(full, f"{S}/agents-work/{who}/{d}", symlinks=True, ignore=lambda r, names: [n for n in names if os.path.join(r, n) in mirrors])
+                        else: problems.append(f"{BOARD} {size // 1_000_000} MB over the 200 MB cap: not saved")
+                for d in dn:
+                    if d not in SKIPD and os.path.exists(os.path.join(dp, d, ".git")): bundle_repo(os.path.join(dp, d), f"{S}/git-bundles/{who}", os.path.relpath(os.path.join(dp, d), ag).replace(os.sep, "__"))
+                dn[:] = [d for d in dn if d not in SKIPD and not os.path.exists(os.path.join(dp, d, ".git"))]
+                for f in fn:
+                    p = os.path.join(dp, f)
+                    if f.lower().endswith(TEXT) and os.path.isfile(p) and os.path.getsize(p) < 1_000_000:
+                        dst = f"{S}/agents-work/{who}/{os.path.relpath(p, ag)}"; os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.copy2(p, dst)
+    except Exception as e: problems.append(f"agents-work: {type(e).__name__}")
     # 2 optional app data (db via online backup + project files + media)
     if APP:
       os.makedirs(f"{S}/app-data")
@@ -123,7 +180,7 @@ def stage(work):
         for f in os.listdir(a):
             p = os.path.join(a, f)
             if os.path.isfile(p) and os.path.getsize(p) < 2_000_000 and not f.endswith((".log", ".pyc", ".sock")): shutil.copy2(p, dst)
-            elif os.path.isdir(p) and f in ("memory", "skills", "handoff", ".claude"): shutil.copytree(p, f"{dst}/{f}", symlinks=True, ignore=shutil.ignore_patterns("*.log", "node_modules", "__pycache__", "worktrees"))
+            elif os.path.isdir(p) and f in ("memory", "skills", "handoff", ".claude", "state"): shutil.copytree(p, f"{dst}/{f}", symlinks=True, ignore=shutil.ignore_patterns("*.log", "node_modules", "__pycache__", "worktrees"))
     # 5 ~/.claude project memory dirs
     for m in glob.glob(f"{HOME}/.claude/projects/*/memory"):
         shutil.copytree(m, f"{S}/claude-projects/{os.path.basename(os.path.dirname(m))}/memory", symlinks=True)
@@ -131,8 +188,13 @@ def stage(work):
     shutil.copytree(f"{ROOT}/secrets", f"{S}/secrets", symlinks=True, ignore=shutil.ignore_patterns("backup"))
     # 7 optional D1 export (prod)
     if D1_DB:
-      os.makedirs(f"{S}/db-export"); r = subprocess.run(["npx", "--yes", "wrangler", "d1", "export", D1_DB, "--remote", "--config", D1_CONFIG, "--output", f"{S}/db-export/{D1_DB}.sql"], capture_output=True, text=True, timeout=600, cwd=HERE)
-      if r.returncode != 0 or not os.path.exists(f"{S}/db-export/{D1_DB}.sql") or os.path.getsize(f"{S}/db-export/{D1_DB}.sql") < 1000: problems.append("d1 export failed")
+      os.makedirs(f"{S}/db-export"); d1env = dict(os.environ); d1ok = True
+      if D1_TOKEN_FILE:
+        try: d1env["CLOUDFLARE_API_TOKEN"] = open(D1_TOKEN_FILE).read().strip()
+        except OSError: d1ok = False; problems.append("d1 export skipped: token file unreadable (never falls back to the ambient token)")
+      if D1_ACCOUNT_ID: d1env["CLOUDFLARE_ACCOUNT_ID"] = D1_ACCOUNT_ID
+      if d1ok: r = subprocess.run(["npx", "--yes", "wrangler", "d1", "export", D1_DB, "--remote", "--config", D1_CONFIG, "--output", f"{S}/db-export/{D1_DB}.sql"], capture_output=True, text=True, timeout=600, cwd=HERE, env=d1env)
+      if d1ok and (r.returncode != 0 or not os.path.exists(f"{S}/db-export/{D1_DB}.sql") or os.path.getsize(f"{S}/db-export/{D1_DB}.sql") < 1000): problems.append("d1 export failed")
     return S
 def fhash(p):
     h = hashlib.sha256()
