@@ -12,8 +12,8 @@ import { recordInbound } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
 import { readGeminiContext } from "./exec-context.js";
-import { createModelCatalog, parseAgyModels, runCli } from "./model-catalog.js";
-import { sessionToResume, saveSession, clearSession, recordUsage, usageFromGemini, alertConfigFailure, CONFIG_ERROR_RE } from "./exec-sessions.js";
+import { createModelCatalog, parseAgyModels, runCli, usableModel } from "./model-catalog.js";
+import { sessionToResume, rolloverLimits, saveSession, clearSession, recordUsage, usageFromGemini, alertConfigFailure, CONFIG_ERROR_RE } from "./exec-sessions.js";
 
 /**
  * Gemini runtime — drives an agent on Google's Antigravity CLI (`agy`), the successor to the Gemini CLI
@@ -139,12 +139,12 @@ export function deliverGeminiPrompt(cfg: EngineConfig, agent: AgentDef, item: Qu
   // claude/codex paths: --dangerously-skip-permissions so the agent can office-say / git / write the vault.
   // --output-format json: one JSON object on stdout with conversation_id + usage (verified live 2026-10-30).
   const args = ["--dangerously-skip-permissions", "--print-timeout", PRINT_TIMEOUT, "--output-format", "json"];
-  if (agent.model && agent.model !== "default") args.push("--model", agent.model);
+  const pinned = usableModel(agent.id, "gemini", agent.model, geminiRuntime.models);
+  if (pinned) args.push("--model", pinned);
   // --effort only without a pinned model (see effortNote): agy refuses the combination with exit 1.
-  const pinned = agent.model && agent.model !== "default";
   if (!pinned && agent.effort && geminiRuntime.efforts.includes(agent.effort)) args.push("--effort", agent.effort);
   // Continuity: resume the agent's stored conversation (cleared by the context roll-over or a reset).
-  const resumeId = sessionToResume(agent.id, "gemini");
+  const resumeId = sessionToResume(agent.id, "gemini", rolloverLimits(cfg.execSessions));
   if (resumeId) args.push("--conversation", resumeId);
   args.push("--print", prompt);
 

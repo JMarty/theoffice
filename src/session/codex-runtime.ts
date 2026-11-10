@@ -12,8 +12,8 @@ import { recordInbound, recentConversation } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
 import { readCodexContext } from "./exec-context.js";
-import { createModelCatalog, parseCodexModels, runCli } from "./model-catalog.js";
-import { sessionToResume, saveSession, clearSession, recordUsage, usageFromCodex, alertConfigFailure, CONFIG_ERROR_RE, type TurnUsage } from "./exec-sessions.js";
+import { createModelCatalog, parseCodexModels, runCli, usableModel } from "./model-catalog.js";
+import { sessionToResume, rolloverLimits, saveSession, clearSession, recordUsage, usageFromCodex, alertConfigFailure, CONFIG_ERROR_RE, type TurnUsage } from "./exec-sessions.js";
 
 /**
  * Codex runtime path (Pete-on-Codex pilot). A `runtime: "codex"` agent does NOT run a persistent TUI
@@ -137,13 +137,14 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   }
   // Continuity: `codex exec resume <thread_id>` continues the stored conversation (cleared by the context
   // roll-over, a dead/full thread or a reset). Same flags are accepted after `resume` (codex exec resume --help).
-  const resumeId = sessionToResume(agent.id, "codex");
+  const resumeId = sessionToResume(agent.id, "codex", rolloverLimits(cfg.execSessions));
   const framed = frameForDelivery(item);
   const prompt = resumeId ? framed : withHistory(agent.id, framed);
   // unattended posture, same spirit as claude's --dangerously-skip-permissions (the box is the boundary):
   // no approval prompts, no sandbox restriction so the agent can office-say / git / write the vault.
   const flags = ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
-  if (agent.model && agent.model !== "default") flags.push("-m", agent.model);
+  const model = usableModel(agent.id, "codex", agent.model, codexRuntime.models);
+  if (model) flags.push("-m", model);
   if (agent.effort && codexRuntime.efforts.includes(agent.effort)) flags.push("-c", `model_reasoning_effort="${agent.effort}"`);
   const args = resumeId ? ["exec", "resume", ...flags, resumeId, prompt] : ["exec", ...flags, prompt];
 

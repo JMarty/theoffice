@@ -57,6 +57,24 @@ export function createModelCatalog(opts: {
   };
 }
 
+/**
+ * The `--model` value to pass for an agent, or null to let the CLI use the account default: only a slug the
+ * runtime itself lists. agent.json often keeps a model id from another provider (an agent flipped from
+ * claude to codex keeps "claude-sonnet-5-5"), and the CLI rejects that as a config error, failing every
+ * turn. Logs once per agent+model that the configured value was ignored.
+ */
+const ignoredModels = new Set<string>();
+export function usableModel(agentId: string, runtime: string, model: string | undefined, models: readonly string[]): string | null {
+  if (!model || model === "default") return null;
+  if (models.includes(model)) return model;
+  const key = `${agentId}\0${runtime}\0${model}`;
+  if (!ignoredModels.has(key)) {
+    ignoredModels.add(key);
+    logger.warn({ agent: agentId, runtime, model }, "configured model is not in this runtime's model list; using the account default");
+  }
+  return null;
+}
+
 /** `agy models`: tab-separated "<slug>\t<label>" lines after a "Fetching..." banner. */
 export function parseAgyModels(out: string): string[] {
   const slugs: string[] = [];

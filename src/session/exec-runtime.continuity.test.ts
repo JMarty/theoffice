@@ -129,6 +129,31 @@ describe("gemini continuity + flags", () => {
   });
 });
 
+describe("a model id from another provider is never passed to the CLI", () => {
+  it("codex agent with a claude model id: no -m, the turn runs on the account default", () => {
+    const a = agent({ model: "claude-sonnet-5" }) as { id: string };
+    deliverCodexPrompt(cfg, a as never, item(a));
+    expect(argsOf()).not.toContain("-m");
+    expect(argsOf().join(" ")).not.toContain("claude-sonnet-5");
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ type: "thread.started", thread_id: "T" }) + "\n"));
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ type: "turn.completed" }) + "\n"));
+    child.emit("close", 0);
+    expect(q.markDelivered).toHaveBeenCalledTimes(1);
+    expect(q.markFailed).not.toHaveBeenCalled();
+  });
+  it("codex agent with a codex model id keeps -m", () => {
+    const a = agent({ model: "gpt-5.5" });
+    deliverCodexPrompt(cfg, a, item(a as { id: string }));
+    expect(argsOf()[argsOf().indexOf("-m") + 1]).toBe("gpt-5.5");
+  });
+  it("gemini agent with a model agy does not list: no --model, and its effort applies again", () => {
+    const a = agent({ model: "claude-opus-5-5", effort: "high" });
+    deliverGeminiPrompt(cfg, a, item(a as { id: string }));
+    expect(argsOf()).not.toContain("--model");
+    expect(argsOf()[argsOf().indexOf("--effort") + 1]).toBe("high");
+  });
+});
+
 describe("gemini --effort vs --model (agy refuses the combination)", () => {
   it("a pinned model gets NO --effort", () => {
     const a = agent({ model: "gemini-3.8-flash-high", effort: "high" });
