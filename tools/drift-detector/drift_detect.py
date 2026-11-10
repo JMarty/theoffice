@@ -75,11 +75,18 @@ def slack_replied(agent, channel, since_epoch):
     except Exception:
         return False
 
+AGENTS_DIR = "/opt/claude/theoffice/tenant/agents"
+def is_codex(agent):
+    try:
+        with open(f"{AGENTS_DIR}/{agent}/agent.json") as f: return (json.load(f).get("runtime") or "claude") == "codex"
+    except Exception:
+        return False
+
 def detect(now, conn, check_busy=True):
     cur = conn.cursor()
     # owner channel messages delivered, older than the window, within lookback
     rows = cur.execute("""
-        SELECT id, agent_id, delivered_at, reply_channel, substr(replace(prompt,char(10),' '),1,60)
+        SELECT id, agent_id, delivered_at, reply_channel, substr(replace(prompt,char(10),' '),1,60), created_at
         FROM inbound_queue
         WHERE source='channel' AND delivered_at IS NOT NULL
           AND owner_alarmed_at IS NULL
@@ -88,12 +95,14 @@ def detect(now, conn, check_busy=True):
         ORDER BY id
     """, (now - WINDOW_S, now - LOOKBACK_S)).fetchall()
     drifts = []
-    for iid, agent, delivered, reply_channel, snippet in rows:
+    for iid, agent, delivered, reply_channel, snippet, created in rows:
         # answered = any office-say (outbound) from this agent created after delivery
         # and at/before the evaluation time (created_at<=now keeps --now replays faithful)
         n = cur.execute("""SELECT COUNT(*) FROM outbound_queue
                            WHERE agent_id=? AND created_at >= ? AND created_at <= ?""",
-                        (agent, delivered, now)).fetchone()[0]
+                        (agent, (created if (is_codex(agent) and created) else delivered), now)).fetchone()[0]
+        # codex stamps delivered_at when the exec FINISHES (turn.completed), so its office-say lands BEFORE delivered_at: count replies
+        # from the moment the message arrived (pete / inbound 37578, 2026-11-08)
         if n == 0:
             # outbound_queue is empty BUT the agent may have replied via the DIRECT Slack API
             # (bypasses the queue -- see slack_replied). Verify against Slack before flagging.

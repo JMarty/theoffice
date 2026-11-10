@@ -43,7 +43,8 @@ import {
   listOwnerAlarmable,
   markOwnerAlarmed,
 } from "../queue/index.js";
-import { ownerDropAlarmText, ownerStallAlarmText, permissionPromptAlarmText } from "../queue/policy.js";
+import { ownerDropAlarmText, ownerStallAlarmText, permissionPromptBusText, permissionPromptDecider } from "../queue/policy.js";
+import { sendAgentMessage } from "../bus/index.js";
 
 const logger = log("session-hygiene");
 
@@ -93,8 +94,15 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
         const now = Date.now();
         if (now - (lastPermAlarmAt.get(session) ?? 0) >= PERMISSION_REALARM_MS) {
           lastPermAlarmAt.set(session, now);
-          alarmOwner(cfg, permissionPromptAlarmText(session.replace(/^agent-/, ""), socket, session));
-          logger.error({ session }, "permission/approval prompt detected — LEFT UNTOUCHED (a keystroke would blind-approve); alarmed owner");
+          // Owner rule 2026-11-02: approval prompts are decided by marveen/darryl, never by the owner: bus, with the captured prompt text.
+          const agentId = session.replace(/^agent-/, ""), to = permissionPromptDecider(agentId);
+          try {
+            sendAgentMessage("session-hygiene", to, permissionPromptBusText(agentId, socket, session, pane.split("\n").filter((l) => l.trim()).slice(-14).join("\n")));
+            logger.error({ session, to }, "permission/approval prompt detected — LEFT UNTOUCHED (a keystroke would blind-approve); sent to the decider on the bus");
+          } catch (err) {
+            logger.error({ err, session, to }, "permission/approval prompt detected but the bus message to the decider FAILED (will re-alarm after the cooldown)");
+            lastPermAlarmAt.delete(session);
+          }
         }
         continue;
       }
@@ -170,18 +178,4 @@ export function startSessionHygiene(cfg: EngineConfig): () => void {
     stopped = true;
     clearInterval(handle);
   };
-}
-
-/** Pane-independent owner alarm: post to the owner via the Slack bot (bypasses the broken pane). */
-function alarmOwner(cfg: EngineConfig, text: string): void {
-  const channel = cfg.owner.slackUserId;
-  if (!channel) {
-    logger.error("no owner slack id configured — cannot raise a pane-independent alarm");
-    return;
-  }
-  try {
-    enqueueOutbound(cfg.mainAgentId, channel, text);
-  } catch (err) {
-    logger.error({ err }, "failed to enqueue owner alarm");
-  }
 }

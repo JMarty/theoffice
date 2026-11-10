@@ -8,7 +8,7 @@ import { newSession } from "./tmux.js";
 import { writeAgentSettings } from "./profile.js";
 import { linkTenantSkills } from "./skills-link.js";
 import { markDelivering, markDelivered, markFailed, requeue, requeueNoPenalty, MAX_DELIVERY_ATTEMPTS } from "../queue/index.js";
-import { recordInbound } from "../memory/conversation.js";
+import { recordInbound, recentConversation } from "../memory/conversation.js";
 import type { Runtime, QueuedItem } from "./runtime.js";
 import { frameForDelivery } from "./delivery.js";
 import { readCodexContext } from "./exec-context.js";
@@ -39,6 +39,26 @@ const USAGE_LIMIT_RE =
 // silently wedge the agent. Hard-kill the subprocess after this long; the kill routes through the normal
 // terminal handler as a no-penalty requeue (our kill, not the message's fault).
 const TURN_TIMEOUT_MS = 13 * 60_000;
+
+// ---- conversation continuity ----
+// The thread id lives in exec-sessions (runtime_sessions, shared with gemini, rolled over by context size). From upstream:
+// a fresh thread gets the last HISTORY_MESSAGES conversation_log messages prepended as a safety net, and a dead or full
+// thread is detected from the CLI's error output, dropped, and the same message retried fresh without burning an attempt.
+const HISTORY_MESSAGES = 10;
+const HISTORY_CHARS = 500;
+const DEAD_SESSION_RE = /no rollout found|thread\/resume failed|session not found/i;
+const CONTEXT_FULL_RE = /context window|context length|out of room|maximum context/i;
+function withHistory(agentId: string, prompt: string): string {
+  let rows: { direction: string; text: string }[] = [];
+  try {
+    rows = recentConversation(agentId, HISTORY_MESSAGES);
+  } catch {
+    return prompt; // the preamble is a safety net, never a reason to fail a delivery
+  }
+  if (!rows.length) return prompt;
+  const lines = rows.map((r) => `${r.direction === "in" ? "Owner" : "You"}: ${String(r.text).replace(/\s+/g, " ").slice(0, HISTORY_CHARS)}`);
+  return `[Earlier in this conversation, oldest first, for continuity - do not answer these again]\n${lines.join("\n")}\n[End of earlier conversation]\n\n${prompt}`;
+}
 
 export type CodexOutcome = "delivered" | "backoff" | "failed" | "requeue";
 
@@ -115,15 +135,16 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       /* best-effort */
     }
   }
-  const prompt = frameForDelivery(item);
+  // Continuity: `codex exec resume <thread_id>` continues the stored conversation (cleared by the context
+  // roll-over, a dead/full thread or a reset). Same flags are accepted after `resume` (codex exec resume --help).
+  const resumeId = sessionToResume(agent.id, "codex");
+  const framed = frameForDelivery(item);
+  const prompt = resumeId ? framed : withHistory(agent.id, framed);
   // unattended posture, same spirit as claude's --dangerously-skip-permissions (the box is the boundary):
   // no approval prompts, no sandbox restriction so the agent can office-say / git / write the vault.
   const flags = ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
   if (agent.model && agent.model !== "default") flags.push("-m", agent.model);
   if (agent.effort && codexRuntime.efforts.includes(agent.effort)) flags.push("-c", `model_reasoning_effort="${agent.effort}"`);
-  // Continuity: `codex exec resume <thread_id>` continues the stored conversation (cleared by the context
-  // roll-over or a reset). Same flags are accepted after `resume` (codex exec resume --help).
-  const resumeId = sessionToResume(agent.id, "codex");
   const args = resumeId ? ["exec", "resume", ...flags, resumeId, prompt] : ["exec", ...flags, prompt];
 
   // Codex P3 spawn-safety: claim in-flight + charge the attempt ONLY after the subprocess actually spawned.
@@ -152,6 +173,8 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
   let threadId: string | null = null;
   let configError: string | null = null;
   let turnUsage: TurnUsage | null = null;
+  let sawDeadSession = false;
+  let sawContextFull = false;
   let buf = "";
   let settled = false; // latch: 'error' is usually FOLLOWED by 'close' — book the terminal outcome exactly once
   let timedOut = false;
@@ -177,6 +200,13 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
       // our kill, not the message's fault -> refund the attempt and retry next tick
       requeueNoPenalty(item.id);
       logger.warn({ id: item.id, agent: agent.id, timeoutMin: TURN_TIMEOUT_MS / 60_000 }, "codex turn watchdog timeout -> killed + requeued (no attempt charged)");
+      return;
+    }
+    if (sawDeadSession || sawContextFull) {
+      // the stored thread is gone or full: drop it and retry the SAME message on a fresh thread (not the message's fault)
+      clearSession(agent.id);
+      requeueNoPenalty(item.id);
+      logger.warn({ id: item.id, agent: agent.id, dead: sawDeadSession }, "codex thread dropped -> next turn starts fresh (no attempt charged)");
       return;
     }
     const outcome = decideCodexOutcome({ code, sawCompleted, sawUsageLimit, attempts: item.attempts, configError: !!configError });
@@ -223,19 +253,24 @@ export function deliverCodexPrompt(cfg: EngineConfig, agent: AgentDef, item: Que
         // error / turn.failed events carry the CLI's message; a config-class message can never succeed on retry
         const evMsg = ev?.type === "error" ? ev.message : ev?.type === "turn.failed" ? ev.error?.message : undefined;
         if (typeof evMsg === "string" && CONFIG_ERROR_RE.test(evMsg)) configError = evMsg;
+        // only error-ish events can mean a dead thread; an agent_message that merely quotes the phrase must not drop it
+        if ((ev?.type === "error" || ev?.type === "turn.failed") && resumeId && DEAD_SESSION_RE.test(line)) sawDeadSession = true;
         if (ev?.type === "turn.completed") {
           sawCompleted = true;
           turnUsage = usageFromCodex(ev.usage);
         }
       } catch {
-        /* non-JSON line, ignore */
+        if (resumeId && DEAD_SESSION_RE.test(line)) sawDeadSession = true; // plain-text error line
       }
       if (USAGE_LIMIT_RE.test(line)) sawUsageLimit = true; // error events sometimes ride on stdout
     }
   });
   // codex surfaces auth/limit errors on stderr too
   child.stderr.on("data", (d: Buffer) => {
-    if (USAGE_LIMIT_RE.test(d.toString())) sawUsageLimit = true;
+    const t = d.toString();
+    if (DEAD_SESSION_RE.test(t) && resumeId) sawDeadSession = true;
+    if (CONTEXT_FULL_RE.test(t)) sawContextFull = true;
+    if (USAGE_LIMIT_RE.test(t)) sawUsageLimit = true;
   });
 
   child.on("close", (code) => finish(code));
