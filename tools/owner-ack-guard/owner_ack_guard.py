@@ -37,6 +37,7 @@ Scope: default agent = marveen (the reported channel). Broaden via OWNER_ACK_GUA
 Rollback: stop/disable owner-ack-guard.timer (kills everything); owner_alarmed_at then stays NULL and
 the slower watchdogs resume their normal role.
 """
+import re
 import argparse, json, os, sqlite3, subprocess, time, urllib.request
 TENANT = os.environ.get("OFFICE_TENANT_ROOT") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tenant")
 ROOT = os.environ.get("OFFICE_ROOT") or os.path.dirname(TENANT)
@@ -56,6 +57,8 @@ CLOSERS = {
     "ok", "okay", "k", "kk", "thanks", "thank you", "ty", "thx", "cheers", "got it", "gotit",
     "perfect", "great", "cool", "nice", "noted", "sounds good", "sg", "will do", "ok thanks",
     "okay thanks", "ok thank you", "thanks!", "great thanks", "👍", "🙏", "👌", "✅", "🎉",
+    # Hungarian closers (brief 2026-11-10: "rendben" must close like "ok")
+    "rendben", "oké", "oke", "köszi", "köszönöm", "értem", "ok köszi", "ok rendben",
 }
 
 
@@ -123,7 +126,16 @@ def slack_replied(agent, channel, since_epoch):
         return False
 
 
+SLACK_HEADER_RE = re.compile(r"^\s*\[Slack [^\]\n]*\]\s*(?:\n|$)")
+
+
+def strip_slack_header(prompt):
+    """PR #32 prepends '[Slack DM: channel D1]' (or channel / thread forms) to the owner message: look past that ONE leading line, never a header-shaped line inside the text."""
+    return SLACK_HEADER_RE.sub("", prompt or "", count=1)
+
+
 def needs_no_reply(prompt):
+    prompt = strip_slack_header(prompt)
     # STRICT closer detector: only clearly-no-reply owner messages downgrade to a gentle nudge.
     # A question always needs an answer. Misclassification is low-stakes (tone only) since both
     # paths nudge once + stamp.

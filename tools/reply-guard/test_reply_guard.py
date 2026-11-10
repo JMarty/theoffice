@@ -56,6 +56,17 @@ class Evaluate(unittest.TestCase):
         for t in ("ok", "thanks!", "👍", "got it"):
             self.assertEqual(rg.evaluate([user(OWNER + t), asst_text("noted")], False)["decision"], "allow", t)
 
+    def test_a_slack_location_header_does_not_hide_a_closer_but_a_question_still_needs_a_reply(self):
+        # PR #32 prepends "[Slack DM: channel D1]\n" to the owner message; the closer classifier must look past it (Toby QA)
+        for hdr in ("[Slack DM: channel D123]", "[Slack channel: channel C9]", "[Slack private channel or group DM: channel G7]", "[Slack DM: channel D1, thread reply (thread_ts 1.1)]"):
+            for t in ("ok", "thanks!", "rendben", "got it"):
+                self.assertEqual(rg.evaluate([user(OWNER + "\n\n" + hdr + "\n" + t), asst_text("noted")], False)["decision"], "allow", hdr + " " + t)
+            self.assertEqual(rg.evaluate([user(OWNER + "\n\n" + hdr + "\nwhat is the status?"), asst_text("x")], False)["decision"], "block", hdr)
+            self.assertEqual(rg.evaluate([user(OWNER + "\n\n" + hdr + "\nplease send the report"), asst_text("x")], False)["decision"], "block", hdr)
+
+    def test_a_header_looking_line_in_the_middle_of_a_message_is_not_stripped(self):
+        self.assertEqual(rg.evaluate([user(OWNER + "do this [Slack DM: channel D1] then ok"), asst_text("x")], False)["decision"], "block")
+
     def test_a_question_mark_is_never_a_closer(self):
         self.assertEqual(rg.evaluate([user(OWNER + "ok?"), asst_text("yes")], False)["decision"], "block")
 
