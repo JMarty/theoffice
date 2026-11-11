@@ -671,6 +671,15 @@ async function handleApi(
     return json(res, 200, loadScheduledTasks(cfg));
   }
 
+  // GET /api/inbound/:id: ONE inbound_queue row, read-only (captain + infra payload recovery; 2026-11-11 captain review, so nobody has to ask Michael for a message body). Bearer-gated like every route here.
+  const inboundMatch = /^\/api\/inbound\/([^/]+)$/.exec(path);
+  if (inboundMatch && m === "GET") {
+    const inboundId = inboundMatch[1] ?? "";
+    if (!/^\d+$/.test(inboundId)) return json(res, 400, { error: "numeric inbound id required" });
+    const row = db.prepare("SELECT id, agent_id, source, prompt, reply_channel, reply_user, dedup_key, status, attempts, last_error, created_at, delivered_at FROM inbound_queue WHERE id = ?").get(Number(inboundId));
+    return row ? json(res, 200, row) : json(res, 404, { error: "not found" });
+  }
+
   // GET /api/messages?to=&from=&status=&limit=  — filters are optional + composable
   if (path === "/api/messages" && m === "GET") {
     const where: string[] = [];

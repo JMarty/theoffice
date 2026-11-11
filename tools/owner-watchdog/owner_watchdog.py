@@ -127,8 +127,20 @@ def agent_busy(agent):
     return "esc to interrupt" in out
 
 
-def preview(text, n=90):
-    t = " ".join((text or "").split())
+CAPTAIN_MARK = ":rotating_light: CAPTAIN MODE"
+
+
+def owner_text(text):
+    """The captain router wraps an owner DM with a note (2026-11-11: the alert used to show only the first chars of that note, never the owner's words). Old shape: note first, owner text after 'The original message follows.'; new shape: owner text first, note after a --- line."""
+    s = text or ""
+    if s.startswith(CAPTAIN_MARK) and "The original message follows." in s:
+        return s.split("The original message follows.", 1)[1].lstrip()
+    i = s.find("\n---\n" + CAPTAIN_MARK)
+    return s[:i] if i >= 0 else s
+
+
+def preview(text, n=600):
+    t = " ".join(owner_text(text).split())
     return t[:n] + ("…" if len(t) > n else "")
 
 
