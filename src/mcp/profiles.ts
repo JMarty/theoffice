@@ -19,6 +19,7 @@ export interface Profile {
   role: "owner" | "member";
   name: string;
   header: string; // text put in front of every bus message this person sends
+  authority: string; // optional: replaces the default "needs the owner's GO on Slack" line for this person (member only)
   talk: string[]; // agents this person may message (member only)
   tools: string[];
   allowTags: string[]; // memory rows must carry one of these tags (member only)
@@ -35,6 +36,7 @@ export const ownerProfile = (email: string): Profile => ({
   role: "owner",
   name: "owner",
   header: "",
+  authority: "",
   talk: [],
   tools: [...ALL_TOOLS],
   allowTags: [],
@@ -87,6 +89,7 @@ export function loadProfiles(file: string | undefined, allowedEmails: string[], 
       role: "member",
       name: String(p.name).trim(),
       header: String(p.header ?? "").slice(0, 200),
+      authority: String(p.authority ?? "").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\[/g, "(").replace(/\]/g, ")").trim().slice(0, 400),
       talk,
       tools,
       allowTags: strs(mem.allowTags),
@@ -120,7 +123,8 @@ export function viewRouting(p: Profile, r: Routing): Routing {
     ...r,
     agents,
     defaultAgent: agents[0]!.id,
-    marker: `[${p.header || `FROM ${p.name.toUpperCase()}`}] [Question from ${cap(p.name)} via the claude.ai fleet connector. ${cap(p.name)} is not the owner and has no owner authority: executing, writing or any external step needs the owner's GO on Slack. Answer by POST /api/messages to ${senderFor(p)}, then close this message with the same text as result.]`,
+    ...(p.authority ? { authority: p.authority } : {}),
+    marker: `[${p.header || `FROM ${p.name.toUpperCase()}`}] [Question from ${cap(p.name)} via the claude.ai fleet connector. ${cap(p.name)} is not the owner. ${p.authority || "They have no owner authority: executing, writing or any external step needs the owner's GO on Slack."} Answer by POST /api/messages to ${senderFor(p)}, then close this message with the same text as result.]`,
   };
 }
 
