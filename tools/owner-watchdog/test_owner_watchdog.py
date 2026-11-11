@@ -10,6 +10,9 @@ class Preview(unittest.TestCase):
     def test_a_captain_wrapped_prompt_previews_the_owner_text_not_the_wrapper(self):
         p = ow.preview(OLD + "Tenerife budget: add the second meetup and give me the total please")
         self.assertTrue(p.startswith("Tenerife budget"), p); self.assertNotIn("CAPTAIN MODE", p)
+    def test_the_new_owner_first_shape_previews_the_owner_text(self):
+        p = ow.preview("Add a colleague to the policy\n\n---\n:rotating_light: CAPTAIN MODE (Claude is out, you act for Michael). The text ABOVE the line is the original message.")
+        self.assertEqual(p, "Add a colleague to the policy")
     def test_the_owner_text_is_shown_in_full_up_to_a_generous_limit(self):
         text = "word " * 70                                   # 350 chars
         self.assertEqual(ow.preview(text), " ".join(text.split()))
