@@ -241,6 +241,25 @@ describe("review fixes A/B/D", () => {
   });
 });
 
+describe("whole-word deny list (a member's list shape)", () => {
+  const mk = (deny: string[]) =>
+    profileFor(
+      loadProfiles(
+        tmp({ profiles: { "g@x.y": { role: "member", name: "g", talk: ["infra"], tools: ["send_message"], capPerDay: 5, memory: { allowTags: ["kops"], deny } } } }),
+        [],
+        routing,
+      ),
+      "g@x.y",
+    )!;
+  const g = mk(["=salary", "=token", "=acme", "=elm 6", "=profit first", "=bank"]);
+  it("everyday words that merely contain a listed word pass; the listed word itself still blocks", () => {
+    for (const ok of ["Az előfizetés és a kifizetés rendben, fizetési mód: átutalás", "tokenizer and tokens are fine", "bankszámla, banking", "acmeable", "Elm 66"])
+      expect(blockedBy(g, ok), ok).toBeUndefined();
+    for (const bad of ["his salary is", "the Token is", "Acme export", "Élm 6 rent", "Profit First split", "Bank transfer"])
+      expect(blockedBy(g, bad), bad).toBeDefined();
+  });
+});
+
 describe("authority text per profile", () => {
   const AUTH = "Carl may decide sandbox work with infra directly, no owner approval. Only production merges need a PR (sign).";
   const mk = (extra: object) =>
