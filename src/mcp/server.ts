@@ -13,6 +13,7 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import {
   memoryAgents,
   redactReply,
+  blockedBy,
   ownerProfile,
   loadProfiles,
   profileFor,
@@ -278,6 +279,24 @@ export function createHandler(
   });
   const fail = (msg: string) => ({ isError: true, content: [{ type: "text" as const, text: msg }] });
 
+  // A withheld answer must not vanish: tell the agent who wrote it, once per message, which word hid it.
+  const bounced = new Set<number>();
+  function showReply(profile: Profile, m: Record<string, unknown>): string {
+    const text = clip(m.content, 4000);
+    const hit = blockedBy(profile, text);
+    const id = m.id as number;
+    const writer = String(m.from_agent ?? "");
+    if (hit && profile.role !== "owner" && writer && !writer.startsWith("mcp-") && !bounced.has(id)) {
+      bounced.add(id);
+      void api("POST", "/api/messages", {
+        from: senderFor(profile),
+        to: writer,
+        content: `Your message ${id} to ${profile.name} was withheld by the access filter (blocked word: "${hit}"). ${profile.name} did not get it. Resend without that word.`,
+      }).catch(() => undefined);
+    }
+    return redactReply(profile, text);
+  }
+
   async function repliesFor(
     profile: Profile,
     messageId: number,
@@ -294,7 +313,7 @@ export function createHandler(
       .map((m) => ({
         id: m.id,
         from: m.from_agent,
-        content: redactReply(profile, clip(m.content, 4000)),
+        content: showReply(profile, m),
         created_at: m.created_at,
       }));
   }
@@ -521,7 +540,7 @@ export function createHandler(
           .map((m) => ({
             id: m.id,
             from: m.from_agent,
-            content: redactReply(profile, clip(m.content, 4000)),
+            content: showReply(profile, m),
             created_at: m.created_at,
           }));
         return ok({ original, replies });

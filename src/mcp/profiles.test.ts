@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   memoryAgents,
   redactReply,
+  blockedBy,
   senderFor,
   loadProfiles,
   toolAllowed,
@@ -220,6 +221,14 @@ describe("review fixes A/B/D", () => {
     expect(redactReply(h, "the birthday SURPRISE is a ring")).toMatch(/withheld/i);
     expect(redactReply(h, "watering done")).toBe("watering done");
     expect(redactReply(profileFor(P, "owner@example.com")!, "the birthday surprise")).toBe("the birthday surprise");
+  });
+  it("D2: blockedBy names the phrase that hid an answer; a whole-word phrase (=nav) does not hit navigation or Navision", () => {
+    expect(blockedBy(h, "the birthday SURPRISE is a ring")).toMatch(/birthday|surprise/);
+    expect(blockedBy(h, "watering done")).toBeUndefined();
+    expect(blockedBy(profileFor(P, "owner@example.com")!, "the birthday surprise")).toBeUndefined();
+    const w = { ...h, deny: ["=nav"] };
+    expect(blockedBy(w, "the NAV export")).toBe("=nav");
+    expect(blockedBy(w, "Navision and navigáció are fine")).toBeUndefined();
   });
   it("E: two profiles may not share a name (one bus address, one counter)", () => {
     const f = tmp({

@@ -46,7 +46,7 @@ const CARDS = [
   { id: 2, title: "home card", assignee: "home", project: "home" },
 ];
 
-async function rig(profilesObj: unknown, caps = { min: 5, day: 30 }) {
+async function rig(profilesObj: unknown, caps = { min: 5, day: 30 }, msgs: Array<Record<string, unknown>> = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-"));
   const pf = path.join(dir, "profiles.json");
   fs.writeFileSync(pf, JSON.stringify(profilesObj));
@@ -74,7 +74,7 @@ async function rig(profilesObj: unknown, caps = { min: 5, day: 30 }) {
       posts.push(b);
       return j({ id: 100 + posts.length });
     }
-    if (u.pathname === "/api/messages") return j([]);
+    if (u.pathname === "/api/messages") return j(msgs.filter((m) => !u.searchParams.get("to") || m.to_agent === u.searchParams.get("to")));
     return new Response("nf", { status: 404 });
   }) as unknown as typeof fetch;
   fs.writeFileSync(path.join(dir, ".dashboard-token"), "t");
@@ -183,6 +183,19 @@ describe("profiles end to end (canaries)", () => {
     expect(out).toContain("Garden watering");
     expect(out).toContain("sitefront preview");
     for (const c of ["CANARY-SURPRISE", "CANARY-TRACKING", "CANARY-HEALTH", "CRM deal"]) expect(out).not.toContain(c);
+    r.close();
+  });
+  it("Alice: an answer hidden by the filter bounces one notice to the agent who wrote it, naming the word, not repeated", async () => {
+    const row = { id: 7, from_agent: "home", to_agent: "mcp-alice", content: "the birthday SURPRISE is a ring", created_at: "x" };
+    const r = await rig(PROFILES, { min: 5, day: 30 }, [row]);
+    expect(await r.tool("alice@example.com", "get_replies", { since_id: 0, wait_seconds: 0 })).toContain("withheld");
+    await new Promise((x) => setTimeout(x, 50));
+    expect(r.posts.length).toBe(1);
+    expect(r.posts[0]).toMatchObject({ from: "mcp-alice", to: "home" });
+    expect(String(r.posts[0]!.content)).toMatch(/withheld by the access filter .*blocked word/);
+    await r.tool("alice@example.com", "get_replies", { since_id: 0, wait_seconds: 0 });
+    await new Promise((x) => setTimeout(x, 50));
+    expect(r.posts.length).toBe(1);
     r.close();
   });
   it("Alice: cannot message cfo or crm or the owner address; message carries her header and her own bus address", async () => {

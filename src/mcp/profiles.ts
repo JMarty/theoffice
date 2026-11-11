@@ -143,9 +143,10 @@ const tagsOf = (keywords: string) =>
     });
 // Deny phrases match as substrings after normalisation, so "gift" also catches "gifts" and "bank" also catches "bankszamla". A phrase that starts with "="
 // is whole-word only (for a short word that would otherwise hide harmless text, e.g. "=nav" does not hide "navigation").
-const blocked = (p: Profile, text: string): boolean => {
+// The first deny phrase that hits the text (so the sender can be told which word to avoid), or undefined.
+export const blockedBy = (p: Profile, text: string): string | undefined => {
   const n = norm(text);
-  return p.deny.some((d) => {
+  return p.deny.find((d) => {
     if (d.startsWith("=")) {
       const w = norm(d.slice(1));
       return !!w && new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(n);
@@ -153,6 +154,7 @@ const blocked = (p: Profile, text: string): boolean => {
     return n.includes(norm(d));
   });
 };
+const blocked = (p: Profile, text: string): boolean => blockedBy(p, text) !== undefined;
 export function memoryRowAllowed(p: Profile, row: { content?: unknown; keywords?: unknown }): boolean {
   if (p.role === "owner") return true;
   const kw = String(row.keywords ?? ""),
