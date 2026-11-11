@@ -193,6 +193,8 @@ describe("profiles end to end (canaries)", () => {
     expect(r.posts.length).toBe(1);
     expect(r.posts[0]).toMatchObject({ from: "mcp-alice", to: "home" });
     expect(String(r.posts[0]!.content)).toMatch(/withheld by the access filter .*blocked word/);
+    expect(String(r.posts[0]!.content)).toMatch(/Do NOT resend this content; if it was meant for them, ask the owner/);
+    expect(String(r.posts[0]!.content)).not.toMatch(/resend without/i);
     await r.tool("alice@example.com", "get_replies", { since_id: 0, wait_seconds: 0 });
     await new Promise((x) => setTimeout(x, 50));
     expect(r.posts.length).toBe(1);

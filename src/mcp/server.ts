@@ -291,7 +291,7 @@ export function createHandler(
       void api("POST", "/api/messages", {
         from: senderFor(profile),
         to: writer,
-        content: `Your message ${id} to ${profile.name} was withheld by the access filter (blocked word: "${hit}"). ${profile.name} did not get it. Resend without that word.`,
+        content: `Your message ${id} to ${profile.name} was withheld by the access filter (blocked word: "${hit}"). ${profile.name} did not get it. Do NOT resend this content; if it was meant for them, ask the owner.`,
       }).catch(() => undefined);
     }
     return redactReply(profile, text);
