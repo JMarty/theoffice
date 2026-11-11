@@ -11,6 +11,7 @@ export const ALL_TOOLS = [
   "read_dream",
   "send_message",
   "get_replies",
+  "sandbox_check",
 ] as const;
 
 export interface Profile {

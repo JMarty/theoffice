@@ -25,6 +25,7 @@ import {
   type Profile,
   type Profiles,
 } from "./profiles.js";
+import { sandboxCheck } from "./sandbox.js";
 import { FleetOAuth, DEFAULT_REDIRECTS, SCOPE, googleExchangeFromEnv, type GoogleExchange } from "./oauth.js";
 
 export const MCP_SENDER = "owner-mcp";
@@ -496,6 +497,25 @@ export function createHandler(
             ? { id: r.id, to, replies }
             : { id: r.id, to, replies, note: `${to} még dolgozik; később get_replies(message_id: ${r.id})` },
         );
+      },
+    );
+
+    s.registerTool(
+      "sandbox_check",
+      {
+        description:
+          "A beallitott sandbox host (https://*.<host>) elerese: GET vagy POST (max 2 KB body), valasz: status + az elso 2 KB. Atiranyitast nem koveti.",
+        inputSchema: {
+          url: z.string().max(500),
+          method: z.enum(["GET", "POST"]).default("GET"),
+          body: z.string().max(2048).optional(),
+        },
+      },
+      async ({ url, method, body }) => {
+        const base = process.env.FLEET_MCP_SANDBOX_HOST ?? "";
+        if (!base) return fail("sandbox host nincs beallitva (FLEET_MCP_SANDBOX_HOST)");
+        const r = await sandboxCheck(fetchImpl, base, url, method, body);
+        return r.ok ? ok(r) : fail(r.error);
       },
     );
 

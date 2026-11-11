@@ -241,7 +241,7 @@ describe("profiles end to end (canaries)", () => {
     const names = ((await r.call("owner@example.com", "tools/list")).j.result.tools as Array<{ name: string }>).map(
       (t) => t.name,
     );
-    expect(names.length).toBe(7);
+    expect(names.length).toBe(8);
     expect(await r.tool("owner@example.com", "search_memories", { q: "x" })).toContain("CANARY-SURPRISE");
     r.close();
   });
@@ -268,6 +268,40 @@ describe("profiles end to end (canaries)", () => {
     const r = await rig(PROFILES);
     expect((await r.call("alice@example.com", "tools/list")).status).toBe(200);
     expect((await r.call("ghost@example.com", "tools/list")).status).toBe(401);
+    r.close();
+  });
+});
+
+describe("sandbox_check tool", () => {
+  const P2 = {
+    profiles: {
+      "owner@example.com": { role: "owner" },
+      "alice@example.com": {
+        role: "member", name: "alice", header: "h", talk: ["home"],
+        tools: ["send_message", "get_replies"], capPerDay: 3, alertAt: [2, 3],
+      },
+      "bob@example.com": {
+        role: "member", name: "bob", header: "h", talk: ["crm"],
+        tools: ["send_message", "get_replies", "sandbox_check"], capPerDay: 50, alertAt: [40, 50],
+      },
+    },
+  };
+  it("only a profile that lists it has it; a foreign host is refused", async () => {
+    const r = await rig(P2);
+    const names = async (e: string) =>
+      ((await r.call(e, "tools/list")).j?.result?.tools ?? []).map((t: { name: string }) => t.name);
+    expect(await names("bob@example.com")).toContain("sandbox_check");
+    expect(await names("alice@example.com")).not.toContain("sandbox_check");
+    const prev = process.env.FLEET_MCP_SANDBOX_HOST;
+    try {
+      delete process.env.FLEET_MCP_SANDBOX_HOST;
+      expect(await r.tool("bob@example.com", "sandbox_check", { url: "https://abc.sbx.example.test/" })).toMatch(/nincs beallitva/);
+      process.env.FLEET_MCP_SANDBOX_HOST = "sbx.example.test";
+      expect(await r.tool("bob@example.com", "sandbox_check", { url: "https://evil.com/" })).toMatch(/nem engedett/);
+    } finally {
+      if (prev === undefined) delete process.env.FLEET_MCP_SANDBOX_HOST;
+      else process.env.FLEET_MCP_SANDBOX_HOST = prev;
+    }
     r.close();
   });
 });
